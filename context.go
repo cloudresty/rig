@@ -3,6 +3,7 @@ package rig
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 )
@@ -40,8 +41,23 @@ func (c *Context) Writer() http.ResponseWriter {
 }
 
 // Context returns the request's context.Context.
+// This is crucial for passing to database drivers and other libraries
+// that listen for cancellation signals.
 func (c *Context) Context() context.Context {
 	return c.request.Context()
+}
+
+// SetContext updates the underlying request's context.
+// Use this when middleware needs to set a timeout, deadline, or add
+// tracing/telemetry data (e.g., OpenTelemetry spans) to the request.
+//
+// Example:
+//
+//	ctx, cancel := context.WithTimeout(c.Context(), 5*time.Second)
+//	defer cancel()
+//	c.SetContext(ctx)
+func (c *Context) SetContext(ctx context.Context) {
+	c.request = c.request.WithContext(ctx)
 }
 
 // JSON writes a JSON response with the given status code.
@@ -62,13 +78,33 @@ func (c *Context) JSON(code int, v any) error {
 // Bind decodes the request body into the provided struct v.
 // It expects the request body to be JSON and handles closing the body.
 // The struct v should be a pointer.
+//
+// By default, unknown fields in the JSON are silently ignored.
+// For stricter APIs that should reject unknown fields, use BindStrict instead.
 func (c *Context) Bind(v any) error {
 	if c.request.Body == nil {
 		return nil
 	}
-	defer c.request.Body.Close()
+	defer func() { _ = c.request.Body.Close() }()
 
 	return json.NewDecoder(c.request.Body).Decode(v)
+}
+
+// BindStrict decodes the request body into the provided struct v,
+// but returns an error if the JSON contains fields that are not
+// present in the target struct. This is useful for security-sensitive
+// APIs where you want to reject unexpected data.
+//
+// Example error: "json: unknown field \"admin\""
+func (c *Context) BindStrict(v any) error {
+	if c.request.Body == nil {
+		return nil
+	}
+	defer func() { _ = c.request.Body.Close() }()
+
+	decoder := json.NewDecoder(c.request.Body)
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(v)
 }
 
 // Status writes the HTTP status code to the response.
@@ -171,3 +207,29 @@ func (c *Context) MustGet(key string) any {
 	return value
 }
 
+// GetType retrieves a value from the context's key-value store and asserts
+// its type safely using generics. This is the recommended way to retrieve
+// typed values as it avoids panics from incorrect type assertions.
+//
+// Example:
+//
+//	db, err := rig.GetType[*Database](c, "db")
+//	if err != nil {
+//	    return err
+//	}
+//	db.Query(...)
+func GetType[T any](c *Context, key string) (T, error) {
+	var zero T
+
+	value, ok := c.Get(key)
+	if !ok {
+		return zero, fmt.Errorf("rig: key '%s' not found in context", key)
+	}
+
+	typedValue, ok := value.(T)
+	if !ok {
+		return zero, fmt.Errorf("rig: value for key '%s' is not of type %T", key, zero)
+	}
+
+	return typedValue, nil
+}

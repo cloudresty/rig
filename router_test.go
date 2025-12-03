@@ -149,7 +149,7 @@ r := New()
 testErr := errors.New("custom error")
 
 r.SetErrorHandler(func(c *Context, err error) {
-c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+_ = c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 })
 
 r.GET("/error", func(c *Context) error {
@@ -178,7 +178,7 @@ errorHandlerCalled = true
 })
 
 r.GET("/error", func(c *Context) error {
-c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+_ = c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 return errors.New("this error should be ignored")
 })
 
@@ -491,7 +491,7 @@ func TestRouter_MiddlewareErrorPropagation(t *testing.T) {
 
 	r.SetErrorHandler(func(c *Context, err error) {
 		errorHandlerCalled = true
-		c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		_ = c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	})
 
 	// Middleware that returns an error
@@ -721,4 +721,150 @@ func TestRouter_Use_MultipleMiddleware(t *testing.T) {
 			t.Errorf("order[%d] = %q, want %q", i, order[i], v)
 		}
 	}
+}
+
+func TestRouter_PathValidation(t *testing.T) {
+	tests := []struct {
+		name       string
+		path       string
+		shouldPanic bool
+	}{
+		{"valid path", "/users", false},
+		{"valid path with param", "/users/{id}", false},
+		{"root path", "/", false},
+		{"empty path", "", true},
+		{"no leading slash", "users", true},
+		{"relative path", "users/", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := New()
+
+			defer func() {
+				rec := recover()
+				if tt.shouldPanic && rec == nil {
+					t.Errorf("expected panic for path %q", tt.path)
+				}
+				if !tt.shouldPanic && rec != nil {
+					t.Errorf("unexpected panic for path %q: %v", tt.path, rec)
+				}
+			}()
+
+			r.GET(tt.path, func(c *Context) error {
+				return nil
+			})
+		})
+	}
+}
+
+func TestRouter_PathValidation_AllMethods(t *testing.T) {
+	methods := []struct {
+		name     string
+		register func(r *Router, path string, h HandlerFunc)
+	}{
+		{"GET", (*Router).GET},
+		{"POST", (*Router).POST},
+		{"PUT", (*Router).PUT},
+		{"DELETE", (*Router).DELETE},
+		{"PATCH", (*Router).PATCH},
+		{"OPTIONS", (*Router).OPTIONS},
+		{"HEAD", (*Router).HEAD},
+	}
+
+	for _, m := range methods {
+		t.Run(m.name+"_invalid", func(t *testing.T) {
+			r := New()
+
+			defer func() {
+				if recover() == nil {
+					t.Errorf("%s should panic for empty path", m.name)
+				}
+			}()
+
+			m.register(r, "", func(c *Context) error { return nil })
+		})
+	}
+}
+
+func TestRouter_GroupPathValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		prefix      string
+		shouldPanic bool
+	}{
+		{"valid prefix", "/api", false},
+		{"valid nested prefix", "/api/v1", false},
+		{"empty prefix", "", true},
+		{"no leading slash", "api", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := New()
+
+			defer func() {
+				rec := recover()
+				if tt.shouldPanic && rec == nil {
+					t.Errorf("expected panic for prefix %q", tt.prefix)
+				}
+				if !tt.shouldPanic && rec != nil {
+					t.Errorf("unexpected panic for prefix %q: %v", tt.prefix, rec)
+				}
+			}()
+
+			r.Group(tt.prefix)
+		})
+	}
+}
+
+func TestRouteGroup_PathValidation(t *testing.T) {
+	r := New()
+	g := r.Group("/api")
+
+	tests := []struct {
+		name        string
+		path        string
+		shouldPanic bool
+	}{
+		{"empty path (group root)", "", false},
+		{"valid path", "/users", false},
+		{"no leading slash", "users", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				rec := recover()
+				if tt.shouldPanic && rec == nil {
+					t.Errorf("expected panic for path %q", tt.path)
+				}
+				if !tt.shouldPanic && rec != nil {
+					t.Errorf("unexpected panic for path %q: %v", tt.path, rec)
+				}
+			}()
+
+			g.GET(tt.path, func(c *Context) error { return nil })
+		})
+	}
+}
+
+func TestRouteGroup_NestedGroupPathValidation(t *testing.T) {
+	r := New()
+	api := r.Group("/api")
+
+	// Valid nested group
+	v1 := api.Group("/v1")
+	if v1 == nil {
+		t.Error("nested group should not be nil")
+	}
+
+	// Invalid nested group
+	defer func() {
+		if recover() == nil {
+			t.Error("nested group with invalid prefix should panic")
+		}
+	}()
+
+	api.Group("v2") // missing leading slash
 }

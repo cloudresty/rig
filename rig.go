@@ -23,7 +23,6 @@ type ErrorHandler func(*Context, error)
 func DefaultErrorHandler(c *Context, err error) {
 	if err != nil {
 		c.writer.WriteHeader(500)
-		c.writer.Write([]byte("Internal Server Error"))
+		_, _ = c.writer.Write([]byte("Internal Server Error"))
 	}
 }
-

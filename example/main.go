@@ -114,7 +114,7 @@ func main() {
 		requestID, _ := c.Get("requestID")
 		log.Printf("[ERROR] RequestID=%v: %v", requestID, err)
 
-		c.JSON(http.StatusInternalServerError, Response{
+		_ = c.JSON(http.StatusInternalServerError, Response{
 			Success: false,
 			Message: err.Error(),
 		})
@@ -122,8 +122,11 @@ func main() {
 
 	// GET /health - Health check using injected database
 	r.GET("/health", func(c *rig.Context) error {
-		// Retrieve the database from context using MustGet
-		database := c.MustGet("db").(*Database)
+		// Retrieve the database from context using the type-safe GetType helper
+		database, err := rig.GetType[*Database](c, "db")
+		if err != nil {
+			return err
+		}
 
 		return c.JSON(http.StatusOK, Response{
 			Success: true,
@@ -139,8 +142,12 @@ func main() {
 	r.GET("/users/{id}", func(c *rig.Context) error {
 		id := c.Param("id")
 
-		// Get database from context (injected by middleware)
-		database := c.MustGet("db").(*Database)
+		// Get database from context using the type-safe GetType helper
+		// This is safer than MustGet as it returns an error instead of panicking
+		database, err := rig.GetType[*Database](c, "db")
+		if err != nil {
+			return err
+		}
 
 		// Use the database to find the user
 		user, err := database.FindUser(id)

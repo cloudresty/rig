@@ -2,6 +2,7 @@ package rig
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -527,6 +528,213 @@ func TestContext_Store_TypeAssertion(t *testing.T) {
 	sliceVal := c.MustGet("slice").([]string)
 	if len(sliceVal) != 3 || sliceVal[0] != "a" {
 		t.Errorf("slice value = %v, unexpected", sliceVal)
+	}
+}
+
+func TestContext_SetContext(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	c := newContext(w, r)
+
+	// Create a context with a value
+	type ctxKey string
+	key := ctxKey("user")
+	ctx := context.WithValue(c.Context(), key, "john")
+
+	// Set the new context
+	c.SetContext(ctx)
+
+	// Verify the context was updated
+	if c.Context().Value(key) != "john" {
+		t.Errorf("SetContext() did not update context, got %v", c.Context().Value(key))
+	}
+
+	// Verify Request() also reflects the new context
+	if c.Request().Context().Value(key) != "john" {
+		t.Errorf("Request().Context() did not reflect SetContext change")
+	}
+}
+
+func TestContext_SetContext_WithCancel(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	c := newContext(w, r)
+
+	// Create a cancellable context
+	ctx, cancel := context.WithCancel(c.Context())
+	c.SetContext(ctx)
+
+	// Verify context is not cancelled yet
+	select {
+	case <-c.Context().Done():
+		t.Error("context should not be done yet")
+	default:
+		// expected
+	}
+
+	// Cancel and verify
+	cancel()
+
+	select {
+	case <-c.Context().Done():
+		// expected
+	default:
+		t.Error("context should be done after cancel")
+	}
+}
+
+func TestGetType_Success(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	c := newContext(w, r)
+
+	type Database struct {
+		Name string
+	}
+
+	db := &Database{Name: "testdb"}
+	c.Set("db", db)
+
+	// Test successful type retrieval
+	result, err := GetType[*Database](c, "db")
+	if err != nil {
+		t.Fatalf("GetType() error = %v", err)
+	}
+	if result.Name != "testdb" {
+		t.Errorf("GetType() = %v, want %v", result.Name, "testdb")
+	}
+}
+
+func TestGetType_KeyNotFound(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	c := newContext(w, r)
+
+	// Test key not found
+	result, err := GetType[string](c, "nonexistent")
+	if err == nil {
+		t.Error("GetType() should return error for nonexistent key")
+	}
+	if result != "" {
+		t.Errorf("GetType() should return zero value, got %v", result)
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error should mention 'not found', got: %v", err)
+	}
+}
+
+func TestGetType_WrongType(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	c := newContext(w, r)
+
+	c.Set("number", 42)
+
+	// Try to get as wrong type
+	result, err := GetType[string](c, "number")
+	if err == nil {
+		t.Error("GetType() should return error for wrong type")
+	}
+	if result != "" {
+		t.Errorf("GetType() should return zero value, got %v", result)
+	}
+	if !strings.Contains(err.Error(), "not of type") {
+		t.Errorf("error should mention type mismatch, got: %v", err)
+	}
+}
+
+func TestGetType_PointerTypes(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	c := newContext(w, r)
+
+	type Config struct {
+		Debug bool
+	}
+
+	cfg := &Config{Debug: true}
+	c.Set("config", cfg)
+
+	// GetType with pointer
+	result, err := GetType[*Config](c, "config")
+	if err != nil {
+		t.Fatalf("GetType() error = %v", err)
+	}
+	if !result.Debug {
+		t.Errorf("GetType() = %v, want Debug=true", result)
+	}
+
+	// Modifying the result should affect the original
+	result.Debug = false
+	original := c.MustGet("config").(*Config)
+	if original.Debug {
+		t.Error("modifying GetType result should affect original")
+	}
+}
+
+func TestBindStrict(t *testing.T) {
+	type User struct {
+		Name string `json:"name"`
+	}
+
+	tests := []struct {
+		name      string
+		body      string
+		wantErr   bool
+		errSubstr string
+	}{
+		{
+			name:    "valid JSON",
+			body:    `{"name":"John"}`,
+			wantErr: false,
+		},
+		{
+			name:      "unknown field",
+			body:      `{"name":"John","admin":true}`,
+			wantErr:   true,
+			errSubstr: "unknown field",
+		},
+		{
+			name:    "empty JSON",
+			body:    `{}`,
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tt.body))
+			c := newContext(w, r)
+
+			var user User
+			err := c.BindStrict(&user)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("BindStrict() should return error")
+				} else if !strings.Contains(err.Error(), tt.errSubstr) {
+					t.Errorf("error should contain %q, got: %v", tt.errSubstr, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("BindStrict() error = %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestBindStrict_NilBody(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/", nil)
+	r.Body = nil
+	c := newContext(w, r)
+
+	var data map[string]string
+	err := c.BindStrict(&data)
+	if err != nil {
+		t.Errorf("BindStrict() with nil body should not error, got %v", err)
 	}
 }
 
