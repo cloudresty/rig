@@ -1,0 +1,724 @@
+package rig
+
+import (
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestNew(t *testing.T) {
+r := New()
+
+if r == nil {
+t.Fatal("New() returned nil")
+}
+if r.mux == nil {
+t.Error("New() mux is nil")
+}
+if r.errorHandler == nil {
+t.Error("New() errorHandler is nil")
+}
+}
+
+func TestRouter_HTTPMethods(t *testing.T) {
+tests := []struct {
+method     string
+register   func(r *Router, path string, h HandlerFunc)
+wantStatus int
+}{
+{http.MethodGet, (*Router).GET, http.StatusOK},
+{http.MethodPost, (*Router).POST, http.StatusOK},
+{http.MethodPut, (*Router).PUT, http.StatusOK},
+{http.MethodDelete, (*Router).DELETE, http.StatusOK},
+{http.MethodPatch, (*Router).PATCH, http.StatusOK},
+{http.MethodOptions, (*Router).OPTIONS, http.StatusOK},
+{http.MethodHead, (*Router).HEAD, http.StatusOK},
+}
+
+for _, tt := range tests {
+t.Run(tt.method, func(t *testing.T) {
+r := New()
+called := false
+
+tt.register(r, "/test", func(c *Context) error {
+called = true
+return c.JSON(http.StatusOK, map[string]string{"method": tt.method})
+})
+
+req := httptest.NewRequest(tt.method, "/test", nil)
+w := httptest.NewRecorder()
+
+r.ServeHTTP(w, req)
+
+if !called {
+t.Error("handler was not called")
+}
+if w.Code != tt.wantStatus {
+t.Errorf("status = %d, want %d", w.Code, tt.wantStatus)
+}
+})
+}
+}
+
+func TestRouter_Handle(t *testing.T) {
+r := New()
+called := false
+
+r.Handle("GET /custom", func(c *Context) error {
+called = true
+return nil
+})
+
+req := httptest.NewRequest(http.MethodGet, "/custom", nil)
+w := httptest.NewRecorder()
+
+r.ServeHTTP(w, req)
+
+if !called {
+t.Error("handler was not called")
+}
+}
+
+func TestRouter_PathParams(t *testing.T) {
+r := New()
+var capturedID string
+
+r.GET("/users/{id}", func(c *Context) error {
+capturedID = c.Param("id")
+return c.JSON(http.StatusOK, nil)
+})
+
+req := httptest.NewRequest(http.MethodGet, "/users/123", nil)
+w := httptest.NewRecorder()
+
+r.ServeHTTP(w, req)
+
+if capturedID != "123" {
+t.Errorf("Param(id) = %q, want %q", capturedID, "123")
+}
+}
+
+func TestRouter_MultiplePathParams(t *testing.T) {
+r := New()
+var org, repo string
+
+r.GET("/orgs/{org}/repos/{repo}", func(c *Context) error {
+org = c.Param("org")
+repo = c.Param("repo")
+return nil
+})
+
+req := httptest.NewRequest(http.MethodGet, "/orgs/acme/repos/widget", nil)
+w := httptest.NewRecorder()
+
+r.ServeHTTP(w, req)
+
+if org != "acme" {
+t.Errorf("Param(org) = %q, want %q", org, "acme")
+}
+if repo != "widget" {
+t.Errorf("Param(repo) = %q, want %q", repo, "widget")
+}
+}
+
+func TestRouter_ErrorHandler(t *testing.T) {
+r := New()
+testErr := errors.New("test error")
+
+r.GET("/error", func(c *Context) error {
+return testErr
+})
+
+req := httptest.NewRequest(http.MethodGet, "/error", nil)
+w := httptest.NewRecorder()
+
+r.ServeHTTP(w, req)
+
+if w.Code != http.StatusInternalServerError {
+t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+}
+if !strings.Contains(w.Body.String(), "Internal Server Error") {
+t.Errorf("body = %q, want to contain 'Internal Server Error'", w.Body.String())
+}
+}
+
+func TestRouter_CustomErrorHandler(t *testing.T) {
+r := New()
+testErr := errors.New("custom error")
+
+r.SetErrorHandler(func(c *Context, err error) {
+c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+})
+
+r.GET("/error", func(c *Context) error {
+return testErr
+})
+
+req := httptest.NewRequest(http.MethodGet, "/error", nil)
+w := httptest.NewRecorder()
+
+r.ServeHTTP(w, req)
+
+if w.Code != http.StatusBadRequest {
+t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+}
+if !strings.Contains(w.Body.String(), "custom error") {
+t.Errorf("body = %q, want to contain 'custom error'", w.Body.String())
+}
+}
+
+func TestRouter_ErrorNotCalledWhenWritten(t *testing.T) {
+r := New()
+errorHandlerCalled := false
+
+r.SetErrorHandler(func(c *Context, err error) {
+errorHandlerCalled = true
+})
+
+r.GET("/error", func(c *Context) error {
+c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+return errors.New("this error should be ignored")
+})
+
+req := httptest.NewRequest(http.MethodGet, "/error", nil)
+w := httptest.NewRecorder()
+
+r.ServeHTTP(w, req)
+
+if errorHandlerCalled {
+t.Error("error handler was called even though response was already written")
+}
+if w.Code != http.StatusOK {
+t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+}
+}
+
+func TestRouter_Group(t *testing.T) {
+r := New()
+called := false
+
+api := r.Group("/api")
+api.GET("/users", func(c *Context) error {
+called = true
+return c.JSON(http.StatusOK, nil)
+})
+
+req := httptest.NewRequest(http.MethodGet, "/api/users", nil)
+w := httptest.NewRecorder()
+
+r.ServeHTTP(w, req)
+
+if !called {
+t.Error("grouped handler was not called")
+}
+if w.Code != http.StatusOK {
+t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+}
+}
+
+func TestRouter_GroupNested(t *testing.T) {
+r := New()
+called := false
+
+api := r.Group("/api")
+v1 := api.Group("/v1")
+v1.GET("/users", func(c *Context) error {
+called = true
+return nil
+})
+
+req := httptest.NewRequest(http.MethodGet, "/api/v1/users", nil)
+w := httptest.NewRecorder()
+
+r.ServeHTTP(w, req)
+
+if !called {
+t.Error("nested grouped handler was not called")
+}
+}
+
+func TestRouteGroup_AllMethods(t *testing.T) {
+tests := []struct {
+method   string
+register func(g *RouteGroup, path string, h HandlerFunc)
+}{
+{http.MethodGet, (*RouteGroup).GET},
+{http.MethodPost, (*RouteGroup).POST},
+{http.MethodPut, (*RouteGroup).PUT},
+{http.MethodDelete, (*RouteGroup).DELETE},
+{http.MethodPatch, (*RouteGroup).PATCH},
+}
+
+for _, tt := range tests {
+t.Run(tt.method, func(t *testing.T) {
+r := New()
+g := r.Group("/api")
+called := false
+
+tt.register(g, "/test", func(c *Context) error {
+called = true
+return nil
+})
+
+req := httptest.NewRequest(tt.method, "/api/test", nil)
+w := httptest.NewRecorder()
+
+r.ServeHTTP(w, req)
+
+if !called {
+t.Errorf("%s handler was not called", tt.method)
+}
+})
+}
+}
+
+func TestRouter_Handler(t *testing.T) {
+r := New()
+
+r.GET("/test", func(c *Context) error {
+return c.JSON(http.StatusOK, nil)
+})
+
+handler := r.Handler()
+if handler == nil {
+t.Fatal("Handler() returned nil")
+}
+
+req := httptest.NewRequest(http.MethodGet, "/test", nil)
+w := httptest.NewRecorder()
+
+handler.ServeHTTP(w, req)
+
+if w.Code != http.StatusOK {
+t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+}
+}
+
+func TestRouter_ServeHTTP(t *testing.T) {
+r := New()
+called := false
+
+r.GET("/", func(c *Context) error {
+called = true
+return nil
+})
+
+req := httptest.NewRequest(http.MethodGet, "/", nil)
+w := httptest.NewRecorder()
+
+r.ServeHTTP(w, req)
+
+if !called {
+t.Error("ServeHTTP did not route to handler")
+}
+}
+
+func TestRouter_NotFound(t *testing.T) {
+r := New()
+
+r.GET("/exists", func(c *Context) error {
+return nil
+})
+
+req := httptest.NewRequest(http.MethodGet, "/notfound", nil)
+w := httptest.NewRecorder()
+
+r.ServeHTTP(w, req)
+
+if w.Code != http.StatusNotFound {
+t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
+}
+}
+
+func TestRouter_MethodNotAllowed(t *testing.T) {
+r := New()
+
+r.GET("/resource", func(c *Context) error {
+return nil
+})
+
+req := httptest.NewRequest(http.MethodPost, "/resource", nil)
+w := httptest.NewRecorder()
+
+r.ServeHTTP(w, req)
+
+if w.Code != http.StatusMethodNotAllowed && w.Code != http.StatusNotFound {
+t.Errorf("status = %d, want 405 or 404", w.Code)
+}
+}
+
+func TestRouter_JSONRequest(t *testing.T) {
+r := New()
+
+type Input struct {
+Name string `json:"name"`
+}
+
+r.POST("/echo", func(c *Context) error {
+var input Input
+if err := c.Bind(&input); err != nil {
+return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+}
+return c.JSON(http.StatusOK, input)
+})
+
+body := strings.NewReader(`{"name":"test"}`)
+req := httptest.NewRequest(http.MethodPost, "/echo", body)
+req.Header.Set("Content-Type", "application/json")
+w := httptest.NewRecorder()
+
+r.ServeHTTP(w, req)
+
+if w.Code != http.StatusOK {
+t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+}
+
+want := `{"name":"test"}`
+got := strings.TrimSpace(w.Body.String())
+if got != want {
+t.Errorf("body = %q, want %q", got, want)
+}
+}
+
+func TestRouter_Middleware(t *testing.T) {
+	r := New()
+	var order []string
+
+	// Add middleware that tracks execution order
+	r.Use(func(next HandlerFunc) HandlerFunc {
+		return func(c *Context) error {
+			order = append(order, "mw1-before")
+			err := next(c)
+			order = append(order, "mw1-after")
+			return err
+		}
+	})
+
+	r.Use(func(next HandlerFunc) HandlerFunc {
+		return func(c *Context) error {
+			order = append(order, "mw2-before")
+			err := next(c)
+			order = append(order, "mw2-after")
+			return err
+		}
+	})
+
+	r.GET("/test", func(c *Context) error {
+		order = append(order, "handler")
+		return c.JSON(http.StatusOK, nil)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	// Verify middleware execution order
+	expected := []string{"mw1-before", "mw2-before", "handler", "mw2-after", "mw1-after"}
+	if len(order) != len(expected) {
+		t.Fatalf("order length = %d, want %d", len(order), len(expected))
+	}
+	for i, v := range expected {
+		if order[i] != v {
+			t.Errorf("order[%d] = %q, want %q", i, order[i], v)
+		}
+	}
+}
+
+func TestRouter_MiddlewareWithContext(t *testing.T) {
+	r := New()
+
+	// Middleware that injects a value into context
+	r.Use(func(next HandlerFunc) HandlerFunc {
+		return func(c *Context) error {
+			c.Set("user", "john")
+			return next(c)
+		}
+	})
+
+	r.GET("/test", func(c *Context) error {
+		user := c.MustGet("user").(string)
+		return c.JSON(http.StatusOK, map[string]string{"user": user})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	want := `{"user":"john"}`
+	got := strings.TrimSpace(w.Body.String())
+	if got != want {
+		t.Errorf("body = %q, want %q", got, want)
+	}
+}
+
+func TestRouter_MiddlewareCanShortCircuit(t *testing.T) {
+	r := New()
+	handlerCalled := false
+
+	// Middleware that short-circuits (doesn't call next)
+	r.Use(func(next HandlerFunc) HandlerFunc {
+		return func(c *Context) error {
+			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		}
+	})
+
+	r.GET("/test", func(c *Context) error {
+		handlerCalled = true
+		return c.JSON(http.StatusOK, nil)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if handlerCalled {
+		t.Error("handler should not be called when middleware short-circuits")
+	}
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestRouter_MiddlewareErrorPropagation(t *testing.T) {
+	r := New()
+	errorHandlerCalled := false
+
+	r.SetErrorHandler(func(c *Context, err error) {
+		errorHandlerCalled = true
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	})
+
+	// Middleware that returns an error
+	r.Use(func(next HandlerFunc) HandlerFunc {
+		return func(c *Context) error {
+			return errors.New("middleware error")
+		}
+	})
+
+	r.GET("/test", func(c *Context) error {
+		return c.JSON(http.StatusOK, nil)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if !errorHandlerCalled {
+		t.Error("error handler should be called when middleware returns error")
+	}
+}
+
+func TestRouteGroup_Middleware(t *testing.T) {
+	r := New()
+	var order []string
+
+	// Global middleware
+	r.Use(func(next HandlerFunc) HandlerFunc {
+		return func(c *Context) error {
+			order = append(order, "global")
+			return next(c)
+		}
+	})
+
+	// Create group with its own middleware
+	api := r.Group("/api")
+	api.Use(func(next HandlerFunc) HandlerFunc {
+		return func(c *Context) error {
+			order = append(order, "group")
+			return next(c)
+		}
+	})
+
+	api.GET("/test", func(c *Context) error {
+		order = append(order, "handler")
+		return c.JSON(http.StatusOK, nil)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	// Verify middleware execution order: global -> group -> handler
+	expected := []string{"global", "group", "handler"}
+	if len(order) != len(expected) {
+		t.Fatalf("order length = %d, want %d; order = %v", len(order), len(expected), order)
+	}
+	for i, v := range expected {
+		if order[i] != v {
+			t.Errorf("order[%d] = %q, want %q", i, order[i], v)
+		}
+	}
+}
+
+func TestRouteGroup_NestedMiddleware(t *testing.T) {
+	r := New()
+	var order []string
+
+	// Create nested groups with middleware
+	api := r.Group("/api")
+	api.Use(func(next HandlerFunc) HandlerFunc {
+		return func(c *Context) error {
+			order = append(order, "api")
+			return next(c)
+		}
+	})
+
+	v1 := api.Group("/v1")
+	v1.Use(func(next HandlerFunc) HandlerFunc {
+		return func(c *Context) error {
+			order = append(order, "v1")
+			return next(c)
+		}
+	})
+
+	v1.GET("/test", func(c *Context) error {
+		order = append(order, "handler")
+		return c.JSON(http.StatusOK, nil)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/test", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	// Verify middleware execution order: api -> v1 -> handler
+	expected := []string{"api", "v1", "handler"}
+	if len(order) != len(expected) {
+		t.Fatalf("order length = %d, want %d; order = %v", len(order), len(expected), order)
+	}
+	for i, v := range expected {
+		if order[i] != v {
+			t.Errorf("order[%d] = %q, want %q", i, order[i], v)
+		}
+	}
+}
+
+func TestRouter_MiddlewareNotAffectOtherRoutes(t *testing.T) {
+	r := New()
+	middlewareCalled := false
+
+	// Register route without middleware first
+	r.GET("/no-middleware", func(c *Context) error {
+		return c.JSON(http.StatusOK, map[string]string{"middleware": "no"})
+	})
+
+	// Then add middleware
+	r.Use(func(next HandlerFunc) HandlerFunc {
+		return func(c *Context) error {
+			middlewareCalled = true
+			return next(c)
+		}
+	})
+
+	// Register route with middleware
+	r.GET("/with-middleware", func(c *Context) error {
+		return c.JSON(http.StatusOK, map[string]string{"middleware": "yes"})
+	})
+
+	// Test route registered before middleware
+	req := httptest.NewRequest(http.MethodGet, "/no-middleware", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if middlewareCalled {
+		t.Error("middleware should not be called for route registered before Use()")
+	}
+
+	// Test route registered after middleware
+	middlewareCalled = false
+	req = httptest.NewRequest(http.MethodGet, "/with-middleware", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if !middlewareCalled {
+		t.Error("middleware should be called for route registered after Use()")
+	}
+}
+
+func TestRouter_DependencyInjection(t *testing.T) {
+	r := New()
+
+	// Simulated database
+	type Database struct {
+		Name string
+	}
+	db := &Database{Name: "testdb"}
+
+	// Middleware that injects database
+	r.Use(func(next HandlerFunc) HandlerFunc {
+		return func(c *Context) error {
+			c.Set("db", db)
+			return next(c)
+		}
+	})
+
+	r.GET("/db-check", func(c *Context) error {
+		database := c.MustGet("db").(*Database)
+		return c.JSON(http.StatusOK, map[string]string{"db": database.Name})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/db-check", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	want := `{"db":"testdb"}`
+	got := strings.TrimSpace(w.Body.String())
+	if got != want {
+		t.Errorf("body = %q, want %q", got, want)
+	}
+}
+
+func TestRouter_Use_MultipleMiddleware(t *testing.T) {
+	r := New()
+	var order []string
+
+	// Add multiple middleware in one call
+	r.Use(
+		func(next HandlerFunc) HandlerFunc {
+			return func(c *Context) error {
+				order = append(order, "mw1")
+				return next(c)
+			}
+		},
+		func(next HandlerFunc) HandlerFunc {
+			return func(c *Context) error {
+				order = append(order, "mw2")
+				return next(c)
+			}
+		},
+		func(next HandlerFunc) HandlerFunc {
+			return func(c *Context) error {
+				order = append(order, "mw3")
+				return next(c)
+			}
+		},
+	)
+
+	r.GET("/test", func(c *Context) error {
+		order = append(order, "handler")
+		return nil
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	expected := []string{"mw1", "mw2", "mw3", "handler"}
+	if len(order) != len(expected) {
+		t.Fatalf("order length = %d, want %d", len(order), len(expected))
+	}
+	for i, v := range expected {
+		if order[i] != v {
+			t.Errorf("order[%d] = %q, want %q", i, order[i], v)
+		}
+	}
+}
