@@ -25,7 +25,7 @@ func TestContext_JSON(t *testing.T) {
 			value:      map[string]string{"message": "hello"},
 			wantStatus: http.StatusOK,
 			wantBody:   `{"message":"hello"}`,
-			wantCT:     "application/json",
+			wantCT:     "application/json; charset=utf-8",
 		},
 		{
 			name:       "nil value",
@@ -33,7 +33,7 @@ func TestContext_JSON(t *testing.T) {
 			value:      nil,
 			wantStatus: http.StatusNoContent,
 			wantBody:   "",
-			wantCT:     "application/json",
+			wantCT:     "application/json; charset=utf-8",
 		},
 		{
 			name:       "created status",
@@ -41,7 +41,7 @@ func TestContext_JSON(t *testing.T) {
 			value:      map[string]int{"id": 42},
 			wantStatus: http.StatusCreated,
 			wantBody:   `{"id":42}`,
-			wantCT:     "application/json",
+			wantCT:     "application/json; charset=utf-8",
 		},
 		{
 			name:       "error status",
@@ -49,7 +49,7 @@ func TestContext_JSON(t *testing.T) {
 			value:      map[string]string{"error": "invalid input"},
 			wantStatus: http.StatusBadRequest,
 			wantBody:   `{"error":"invalid input"}`,
-			wantCT:     "application/json",
+			wantCT:     "application/json; charset=utf-8",
 		},
 	}
 
@@ -738,3 +738,202 @@ func TestBindStrict_NilBody(t *testing.T) {
 	}
 }
 
+func TestContext_Redirect(t *testing.T) {
+	tests := []struct {
+		name         string
+		code         int
+		url          string
+		wantCode     int
+		wantLocation string
+	}{
+		{
+			name:         "temporary redirect",
+			code:         http.StatusFound,
+			url:          "/new-location",
+			wantCode:     http.StatusFound,
+			wantLocation: "/new-location",
+		},
+		{
+			name:         "permanent redirect",
+			code:         http.StatusMovedPermanently,
+			url:          "https://example.com",
+			wantCode:     http.StatusMovedPermanently,
+			wantLocation: "https://example.com",
+		},
+		{
+			name:         "see other",
+			code:         http.StatusSeeOther,
+			url:          "/after-post",
+			wantCode:     http.StatusSeeOther,
+			wantLocation: "/after-post",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			c := newContext(w, r)
+
+			c.Redirect(tt.code, tt.url)
+
+			if w.Code != tt.wantCode {
+				t.Errorf("status = %d, want %d", w.Code, tt.wantCode)
+			}
+
+			if loc := w.Header().Get("Location"); loc != tt.wantLocation {
+				t.Errorf("Location = %q, want %q", loc, tt.wantLocation)
+			}
+
+			if !c.Written() {
+				t.Error("Written() should be true after Redirect")
+			}
+		})
+	}
+}
+
+func TestContext_QueryArray(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/?tag=go&tag=rust&tag=python&single=value", nil)
+	c := newContext(w, r)
+
+	// Multiple values
+	tags := c.QueryArray("tag")
+	if len(tags) != 3 {
+		t.Errorf("QueryArray(tag) = %d values, want 3", len(tags))
+	}
+	expected := []string{"go", "rust", "python"}
+	for i, tag := range tags {
+		if tag != expected[i] {
+			t.Errorf("tags[%d] = %q, want %q", i, tag, expected[i])
+		}
+	}
+
+	// Single value
+	single := c.QueryArray("single")
+	if len(single) != 1 || single[0] != "value" {
+		t.Errorf("QueryArray(single) = %v, want [value]", single)
+	}
+
+	// Missing key
+	missing := c.QueryArray("missing")
+	if missing != nil {
+		t.Errorf("QueryArray(missing) = %v, want nil", missing)
+	}
+}
+
+func TestContext_QueryCaching(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/?key=value", nil)
+	c := newContext(w, r)
+
+	// First call parses and caches
+	v1 := c.Query("key")
+	if v1 != "value" {
+		t.Errorf("Query(key) = %q, want %q", v1, "value")
+	}
+
+	// Second call uses cache (coverage of queryParams being non-nil)
+	v2 := c.QueryDefault("key", "default")
+	if v2 != "value" {
+		t.Errorf("QueryDefault(key) = %q, want %q", v2, "value")
+	}
+
+	// Third call also uses cache
+	v3 := c.QueryArray("key")
+	if len(v3) != 1 || v3[0] != "value" {
+		t.Errorf("QueryArray(key) = %v, want [value]", v3)
+	}
+}
+
+func TestContext_JSON_DoubleWritePrevention(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	c := newContext(w, r)
+
+	// First call to Status
+	c.Status(http.StatusCreated)
+
+	// JSON should not overwrite the status
+	err := c.JSON(http.StatusOK, map[string]string{"message": "test"})
+	if err != nil {
+		t.Fatalf("JSON() error = %v", err)
+	}
+
+	// Status should remain 201 (from first call)
+	if w.Code != http.StatusCreated {
+		t.Errorf("status = %d, want %d (first Status call should win)", w.Code, http.StatusCreated)
+	}
+
+	// Body should still be written
+	if !strings.Contains(w.Body.String(), "message") {
+		t.Errorf("body should contain JSON data, got %q", w.Body.String())
+	}
+}
+
+func TestContext_JSON_WritePreventsPanic(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	c := newContext(w, r)
+
+	// Write something first
+	_, _ = c.Write([]byte("hello"))
+
+	// JSON should not panic or try to write headers again
+	err := c.JSON(http.StatusOK, map[string]string{"message": "test"})
+	if err != nil {
+		t.Fatalf("JSON() error = %v", err)
+	}
+
+	// Body should contain both writes
+	body := w.Body.String()
+	if !strings.Contains(body, "hello") {
+		t.Errorf("body should contain first write, got %q", body)
+	}
+	if !strings.Contains(body, "message") {
+		t.Errorf("body should contain JSON, got %q", body)
+	}
+}
+
+func TestContext_FormValue(t *testing.T) {
+	// Create form data
+	form := strings.NewReader("name=John&email=john@example.com")
+	r := httptest.NewRequest(http.MethodPost, "/?name=QueryJohn", form)
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	c := newContext(w, r)
+
+	// POST body takes precedence over query string
+	if got := c.FormValue("name"); got != "John" {
+		t.Errorf("FormValue(name) = %q, want %q", got, "John")
+	}
+
+	// Value only in body
+	if got := c.FormValue("email"); got != "john@example.com" {
+		t.Errorf("FormValue(email) = %q, want %q", got, "john@example.com")
+	}
+
+	// Missing key
+	if got := c.FormValue("missing"); got != "" {
+		t.Errorf("FormValue(missing) = %q, want empty", got)
+	}
+}
+
+func TestContext_PostFormValue(t *testing.T) {
+	// Create form data with query param
+	form := strings.NewReader("name=BodyName")
+	r := httptest.NewRequest(http.MethodPost, "/?name=QueryName&queryOnly=value", form)
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	c := newContext(w, r)
+
+	// PostFormValue ignores query string
+	if got := c.PostFormValue("name"); got != "BodyName" {
+		t.Errorf("PostFormValue(name) = %q, want %q", got, "BodyName")
+	}
+
+	// Query-only param returns empty for PostFormValue
+	if got := c.PostFormValue("queryOnly"); got != "" {
+		t.Errorf("PostFormValue(queryOnly) = %q, want empty", got)
+	}
+}

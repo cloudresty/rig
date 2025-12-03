@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 )
 
 // Context wraps http.ResponseWriter and *http.Request to provide
@@ -20,6 +21,9 @@ type Context struct {
 	// store is a key-value store for passing data between middleware and handlers.
 	// It is lazily initialized to save memory on simple requests.
 	store map[string]any
+
+	// queryCache caches parsed query parameters to avoid re-parsing on each access.
+	queryCache url.Values
 }
 
 // newContext creates a new Context from the given ResponseWriter and Request.
@@ -61,12 +65,17 @@ func (c *Context) SetContext(ctx context.Context) {
 }
 
 // JSON writes a JSON response with the given status code.
-// It sets the Content-Type header to "application/json" and encodes
+// It sets the Content-Type header to "application/json; charset=utf-8" and encodes
 // the provided value v to the response body.
+//
+// Note: Headers and status code can only be written once. If you've already
+// called Status(), Write(), or WriteString(), the headers set here will be ignored.
 func (c *Context) JSON(code int, v any) error {
-	c.writer.Header().Set("Content-Type", "application/json")
-	c.writer.WriteHeader(code)
-	c.written = true
+	if !c.written {
+		c.writer.Header().Set("Content-Type", "application/json; charset=utf-8")
+		c.writer.WriteHeader(code)
+		c.written = true
+	}
 
 	if v == nil {
 		return nil
@@ -141,25 +150,68 @@ func (c *Context) WriteString(s string) (int, error) {
 	return io.WriteString(c.writer, s)
 }
 
+// Redirect sends an HTTP redirect to the specified URL.
+// The code should be a redirect status code (3xx), typically:
+//   - http.StatusMovedPermanently (301) for permanent redirects
+//   - http.StatusFound (302) for temporary redirects
+//   - http.StatusSeeOther (303) for POST-to-GET redirects
+//   - http.StatusTemporaryRedirect (307) to preserve method
+//   - http.StatusPermanentRedirect (308) for permanent, method-preserving redirects
+func (c *Context) Redirect(code int, url string) {
+	http.Redirect(c.writer, c.request, url, code)
+	c.written = true
+}
+
 // Param returns the value of a path parameter from the request.
 // This uses Go 1.22+ PathValue feature.
 func (c *Context) Param(name string) string {
 	return c.request.PathValue(name)
 }
 
+// queryParams returns the cached query parameters, parsing them on first access.
+func (c *Context) queryParams() url.Values {
+	if c.queryCache == nil {
+		c.queryCache = c.request.URL.Query()
+	}
+	return c.queryCache
+}
+
 // Query returns the value of a query string parameter.
+// Query parameters are parsed once and cached for efficient repeated access.
 func (c *Context) Query(key string) string {
-	return c.request.URL.Query().Get(key)
+	return c.queryParams().Get(key)
 }
 
 // QueryDefault returns the value of a query string parameter,
-// or the default value if the parameter is not present.
+// or the default value if the parameter is not present or empty.
+// Query parameters are parsed once and cached for efficient repeated access.
 func (c *Context) QueryDefault(key, defaultValue string) string {
-	value := c.request.URL.Query().Get(key)
+	value := c.queryParams().Get(key)
 	if value == "" {
 		return defaultValue
 	}
 	return value
+}
+
+// QueryArray returns all values for a query string parameter.
+// This is useful for parameters that can have multiple values like ?tag=a&tag=b.
+// Query parameters are parsed once and cached for efficient repeated access.
+func (c *Context) QueryArray(key string) []string {
+	return c.queryParams()[key]
+}
+
+// FormValue returns the first value for the named component of the query.
+// POST and PUT body parameters take precedence over URL query string values.
+// This is useful for handling HTML form submissions (application/x-www-form-urlencoded).
+func (c *Context) FormValue(key string) string {
+	return c.request.FormValue(key)
+}
+
+// PostFormValue returns the first value for the named component of the POST,
+// PATCH, or PUT request body. URL query parameters are ignored.
+// Use this when you want to explicitly read only from the request body.
+func (c *Context) PostFormValue(key string) string {
+	return c.request.PostFormValue(key)
 }
 
 // Method returns the HTTP method of the request.

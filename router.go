@@ -195,35 +195,35 @@ func validateGroupPath(path string) {
 // The path must be empty or begin with '/'. Panics if the path is invalid.
 func (g *RouteGroup) GET(path string, handler HandlerFunc) {
 	validateGroupPath(path)
-	g.handle("GET "+g.prefix+path, handler)
+	g.handle("GET "+joinPaths(g.prefix, path), handler)
 }
 
 // POST registers a handler for POST requests at the given path within the group.
 // The path must be empty or begin with '/'. Panics if the path is invalid.
 func (g *RouteGroup) POST(path string, handler HandlerFunc) {
 	validateGroupPath(path)
-	g.handle("POST "+g.prefix+path, handler)
+	g.handle("POST "+joinPaths(g.prefix, path), handler)
 }
 
 // PUT registers a handler for PUT requests at the given path within the group.
 // The path must be empty or begin with '/'. Panics if the path is invalid.
 func (g *RouteGroup) PUT(path string, handler HandlerFunc) {
 	validateGroupPath(path)
-	g.handle("PUT "+g.prefix+path, handler)
+	g.handle("PUT "+joinPaths(g.prefix, path), handler)
 }
 
 // DELETE registers a handler for DELETE requests at the given path within the group.
 // The path must be empty or begin with '/'. Panics if the path is invalid.
 func (g *RouteGroup) DELETE(path string, handler HandlerFunc) {
 	validateGroupPath(path)
-	g.handle("DELETE "+g.prefix+path, handler)
+	g.handle("DELETE "+joinPaths(g.prefix, path), handler)
 }
 
 // PATCH registers a handler for PATCH requests at the given path within the group.
 // The path must be empty or begin with '/'. Panics if the path is invalid.
 func (g *RouteGroup) PATCH(path string, handler HandlerFunc) {
 	validateGroupPath(path)
-	g.handle("PATCH "+g.prefix+path, handler)
+	g.handle("PATCH "+joinPaths(g.prefix, path), handler)
 }
 
 // Group creates a nested route group with an additional prefix.
@@ -238,7 +238,27 @@ func (g *RouteGroup) Group(prefix string) *RouteGroup {
 
 	return &RouteGroup{
 		router:      g.router,
-		prefix:      g.prefix + prefix,
+		prefix:      joinPaths(g.prefix, prefix),
 		middlewares: newMiddlewares,
 	}
+}
+
+// joinPaths joins two URL path segments, handling edge cases with slashes.
+// It prevents double slashes when prefix ends with '/' and path starts with '/'.
+func joinPaths(prefix, path string) string {
+	if prefix == "" {
+		return path
+	}
+	if path == "" {
+		return prefix
+	}
+	// Avoid double slash: "/api/" + "/users" -> "/api/users"
+	if prefix[len(prefix)-1] == '/' && path[0] == '/' {
+		return prefix + path[1:]
+	}
+	// Add missing slash: "/api" + "users" -> "/api/users"
+	if prefix[len(prefix)-1] != '/' && path[0] != '/' {
+		return prefix + "/" + path
+	}
+	return prefix + path
 }

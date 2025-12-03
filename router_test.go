@@ -868,3 +868,91 @@ func TestRouteGroup_NestedGroupPathValidation(t *testing.T) {
 
 	api.Group("v2") // missing leading slash
 }
+
+func TestJoinPaths(t *testing.T) {
+	tests := []struct {
+		name   string
+		prefix string
+		path   string
+		want   string
+	}{
+		{
+			name:   "normal case",
+			prefix: "/api",
+			path:   "/users",
+			want:   "/api/users",
+		},
+		{
+			name:   "double slash prevention",
+			prefix: "/api/",
+			path:   "/users",
+			want:   "/api/users",
+		},
+		{
+			name:   "missing slash insertion",
+			prefix: "/api",
+			path:   "users",
+			want:   "/api/users",
+		},
+		{
+			name:   "empty prefix",
+			prefix: "",
+			path:   "/users",
+			want:   "/users",
+		},
+		{
+			name:   "empty path",
+			prefix: "/api",
+			path:   "",
+			want:   "/api",
+		},
+		{
+			name:   "both empty",
+			prefix: "",
+			path:   "",
+			want:   "",
+		},
+		{
+			name:   "trailing slash prefix only",
+			prefix: "/api/",
+			path:   "users",
+			want:   "/api/users",
+		},
+		{
+			name:   "nested groups double slash",
+			prefix: "/api/v1/",
+			path:   "/resources",
+			want:   "/api/v1/resources",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := joinPaths(tt.prefix, tt.path)
+			if got != tt.want {
+				t.Errorf("joinPaths(%q, %q) = %q, want %q", tt.prefix, tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRouter_GroupWithTrailingSlash(t *testing.T) {
+	r := New()
+
+	// Create group with trailing slash (user mistake)
+	api := r.Group("/api/")
+
+	// Add route with leading slash
+	api.GET("/users", func(c *Context) error {
+		return c.JSON(http.StatusOK, map[string]string{"path": "users"})
+	})
+
+	// Test that the route works without double slash
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/users", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
