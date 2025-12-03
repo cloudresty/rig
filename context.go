@@ -162,6 +162,30 @@ func (c *Context) Redirect(code int, url string) {
 	c.written = true
 }
 
+// File writes the specified file into the response body.
+// It uses http.ServeFile which handles Content-Type detection,
+// range requests, and Last-Modified headers automatically.
+//
+// Example:
+//
+//	c.File("./reports/monthly.pdf")
+func (c *Context) File(filepath string) {
+	http.ServeFile(c.writer, c.request, filepath)
+	c.written = true
+}
+
+// Data writes raw bytes to the response with the specified status code
+// and content type.
+//
+// Example:
+//
+//	c.Data(http.StatusOK, "image/png", pngBytes)
+func (c *Context) Data(code int, contentType string, data []byte) {
+	c.writer.Header().Set("Content-Type", contentType)
+	c.Status(code)
+	_, _ = c.writer.Write(data)
+}
+
 // Param returns the value of a path parameter from the request.
 // This uses Go 1.22+ PathValue feature.
 func (c *Context) Param(name string) string {

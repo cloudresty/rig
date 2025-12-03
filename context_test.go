@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -935,5 +936,59 @@ func TestContext_PostFormValue(t *testing.T) {
 	// Query-only param returns empty for PostFormValue
 	if got := c.PostFormValue("queryOnly"); got != "" {
 		t.Errorf("PostFormValue(queryOnly) = %q, want empty", got)
+	}
+}
+
+func TestContext_File(t *testing.T) {
+	// Create a temporary file
+	tmpFile, err := os.CreateTemp("", "rig-test-*.txt")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	content := "Hello, this is a test file!"
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("failed to write temp file: %v", err)
+	}
+	_ = tmpFile.Close()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/download", nil)
+	c := newContext(w, r)
+
+	c.File(tmpFile.Name())
+
+	if !c.Written() {
+		t.Error("Written() should be true after File")
+	}
+
+	if !strings.Contains(w.Body.String(), content) {
+		t.Errorf("body = %q, should contain %q", w.Body.String(), content)
+	}
+}
+
+func TestContext_Data(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	c := newContext(w, r)
+
+	data := []byte{0x89, 0x50, 0x4E, 0x47} // PNG magic bytes
+	c.Data(http.StatusOK, "image/png", data)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	if ct := w.Header().Get("Content-Type"); ct != "image/png" {
+		t.Errorf("Content-Type = %q, want %q", ct, "image/png")
+	}
+
+	if !bytes.Equal(w.Body.Bytes(), data) {
+		t.Errorf("body = %v, want %v", w.Body.Bytes(), data)
+	}
+
+	if !c.Written() {
+		t.Error("Written() should be true after Data")
 	}
 }

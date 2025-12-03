@@ -125,6 +125,36 @@ func (r *Router) HEAD(path string, handler HandlerFunc) {
 	r.Handle("HEAD "+path, handler)
 }
 
+// Static registers a route to serve static files from a directory.
+// path is the URL path prefix (e.g., "/assets").
+// root is the local file system directory (e.g., "./public").
+//
+// Example:
+//
+//	r.Static("/assets", "./public")
+//	// GET /assets/css/style.css -> serves ./public/css/style.css
+func (r *Router) Static(path, root string) {
+	validatePath(path)
+
+	// Ensure path ends with slash for correct StripPrefix behavior
+	if path[len(path)-1] != '/' {
+		path += "/"
+	}
+
+	// Create the file server handler
+	fs := http.StripPrefix(path, http.FileServer(http.Dir(root)))
+
+	// Wrap it in a Rig handler to support middleware
+	handler := func(c *Context) error {
+		fs.ServeHTTP(c.Writer(), c.Request())
+		return nil
+	}
+
+	// Use Handle with trailing slash for Go 1.22+ wildcard matching
+	// "GET /assets/" matches everything under it
+	r.Handle("GET "+path, handler)
+}
+
 // ServeHTTP implements the http.Handler interface.
 // This allows the Router to be used directly with http.ListenAndServe.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -246,19 +276,22 @@ func (g *RouteGroup) Group(prefix string) *RouteGroup {
 // joinPaths joins two URL path segments, handling edge cases with slashes.
 // It prevents double slashes when prefix ends with '/' and path starts with '/'.
 func joinPaths(prefix, path string) string {
-	if prefix == "" {
-		return path
-	}
 	if path == "" {
 		return prefix
 	}
-	// Avoid double slash: "/api/" + "/users" -> "/api/users"
-	if prefix[len(prefix)-1] == '/' && path[0] == '/' {
-		return prefix + path[1:]
+
+	finalPath := prefix
+	if finalPath != "" && finalPath[len(finalPath)-1] == '/' {
+		// Strip trailing slash from prefix if path has leading slash
+		if path[0] == '/' {
+			finalPath = finalPath[:len(finalPath)-1]
+		}
+	} else if finalPath != "" {
+		// Add slash between prefix and path if path doesn't have one
+		if path[0] != '/' {
+			finalPath += "/"
+		}
 	}
-	// Add missing slash: "/api" + "users" -> "/api/users"
-	if prefix[len(prefix)-1] != '/' && path[0] != '/' {
-		return prefix + "/" + path
-	}
-	return prefix + path
+
+	return finalPath + path
 }

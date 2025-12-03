@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -955,4 +956,80 @@ func TestRouter_GroupWithTrailingSlash(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 	}
+}
+
+func TestRouter_Static(t *testing.T) {
+	// Create a temporary directory with a test file
+	tmpDir, err := os.MkdirTemp("", "rig-static-test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	// Create a test file
+	testContent := "body { color: red; }"
+	testFile := tmpDir + "/style.css"
+	if err := os.WriteFile(testFile, []byte(testContent), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	r := New()
+	r.Static("/assets", tmpDir)
+
+	// Test serving the file
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/assets/style.css", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	if !strings.Contains(w.Body.String(), testContent) {
+		t.Errorf("body = %q, should contain %q", w.Body.String(), testContent)
+	}
+}
+
+func TestRouter_Static_WithTrailingSlash(t *testing.T) {
+	// Create a temporary directory with a test file
+	tmpDir, err := os.MkdirTemp("", "rig-static-test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	// Create a test file
+	testContent := "console.log('hello');"
+	testFile := tmpDir + "/app.js"
+	if err := os.WriteFile(testFile, []byte(testContent), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	r := New()
+	// Path already has trailing slash
+	r.Static("/static/", tmpDir)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/static/app.js", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	if !strings.Contains(w.Body.String(), testContent) {
+		t.Errorf("body = %q, should contain %q", w.Body.String(), testContent)
+	}
+}
+
+func TestRouter_Static_PathValidation(t *testing.T) {
+	r := New()
+
+	defer func() {
+		if recover() == nil {
+			t.Error("Static() should panic on invalid path")
+		}
+	}()
+
+	r.Static("assets", ".") // missing leading slash
 }
