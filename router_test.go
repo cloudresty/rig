@@ -10,377 +10,377 @@ import (
 )
 
 func TestNew(t *testing.T) {
-r := New()
+	r := New()
 
-if r == nil {
-t.Fatal("New() returned nil")
-}
-if r.mux == nil {
-t.Error("New() mux is nil")
-}
-if r.errorHandler == nil {
-t.Error("New() errorHandler is nil")
-}
+	if r == nil {
+		t.Fatal("New() returned nil")
+	}
+	if r.mux == nil {
+		t.Error("New() mux is nil")
+	}
+	if r.errorHandler == nil {
+		t.Error("New() errorHandler is nil")
+	}
 }
 
 func TestRouter_HTTPMethods(t *testing.T) {
-tests := []struct {
-method     string
-register   func(r *Router, path string, h HandlerFunc)
-wantStatus int
-}{
-{http.MethodGet, (*Router).GET, http.StatusOK},
-{http.MethodPost, (*Router).POST, http.StatusOK},
-{http.MethodPut, (*Router).PUT, http.StatusOK},
-{http.MethodDelete, (*Router).DELETE, http.StatusOK},
-{http.MethodPatch, (*Router).PATCH, http.StatusOK},
-{http.MethodOptions, (*Router).OPTIONS, http.StatusOK},
-{http.MethodHead, (*Router).HEAD, http.StatusOK},
-}
+	tests := []struct {
+		method     string
+		register   func(r *Router, path string, h HandlerFunc)
+		wantStatus int
+	}{
+		{http.MethodGet, (*Router).GET, http.StatusOK},
+		{http.MethodPost, (*Router).POST, http.StatusOK},
+		{http.MethodPut, (*Router).PUT, http.StatusOK},
+		{http.MethodDelete, (*Router).DELETE, http.StatusOK},
+		{http.MethodPatch, (*Router).PATCH, http.StatusOK},
+		{http.MethodOptions, (*Router).OPTIONS, http.StatusOK},
+		{http.MethodHead, (*Router).HEAD, http.StatusOK},
+	}
 
-for _, tt := range tests {
-t.Run(tt.method, func(t *testing.T) {
-r := New()
-called := false
+	for _, tt := range tests {
+		t.Run(tt.method, func(t *testing.T) {
+			r := New()
+			called := false
 
-tt.register(r, "/test", func(c *Context) error {
-called = true
-return c.JSON(http.StatusOK, map[string]string{"method": tt.method})
-})
+			tt.register(r, "/test", func(c *Context) error {
+				called = true
+				return c.JSON(http.StatusOK, map[string]string{"method": tt.method})
+			})
 
-req := httptest.NewRequest(tt.method, "/test", nil)
-w := httptest.NewRecorder()
+			req := httptest.NewRequest(tt.method, "/test", nil)
+			w := httptest.NewRecorder()
 
-r.ServeHTTP(w, req)
+			r.ServeHTTP(w, req)
 
-if !called {
-t.Error("handler was not called")
-}
-if w.Code != tt.wantStatus {
-t.Errorf("status = %d, want %d", w.Code, tt.wantStatus)
-}
-})
-}
+			if !called {
+				t.Error("handler was not called")
+			}
+			if w.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d", w.Code, tt.wantStatus)
+			}
+		})
+	}
 }
 
 func TestRouter_Handle(t *testing.T) {
-r := New()
-called := false
+	r := New()
+	called := false
 
-r.Handle("GET /custom", func(c *Context) error {
-called = true
-return nil
-})
+	r.Handle("GET /custom", func(c *Context) error {
+		called = true
+		return nil
+	})
 
-req := httptest.NewRequest(http.MethodGet, "/custom", nil)
-w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/custom", nil)
+	w := httptest.NewRecorder()
 
-r.ServeHTTP(w, req)
+	r.ServeHTTP(w, req)
 
-if !called {
-t.Error("handler was not called")
-}
+	if !called {
+		t.Error("handler was not called")
+	}
 }
 
 func TestRouter_PathParams(t *testing.T) {
-r := New()
-var capturedID string
+	r := New()
+	var capturedID string
 
-r.GET("/users/{id}", func(c *Context) error {
-capturedID = c.Param("id")
-return c.JSON(http.StatusOK, nil)
-})
+	r.GET("/users/{id}", func(c *Context) error {
+		capturedID = c.Param("id")
+		return c.JSON(http.StatusOK, nil)
+	})
 
-req := httptest.NewRequest(http.MethodGet, "/users/123", nil)
-w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/users/123", nil)
+	w := httptest.NewRecorder()
 
-r.ServeHTTP(w, req)
+	r.ServeHTTP(w, req)
 
-if capturedID != "123" {
-t.Errorf("Param(id) = %q, want %q", capturedID, "123")
-}
+	if capturedID != "123" {
+		t.Errorf("Param(id) = %q, want %q", capturedID, "123")
+	}
 }
 
 func TestRouter_MultiplePathParams(t *testing.T) {
-r := New()
-var org, repo string
+	r := New()
+	var org, repo string
 
-r.GET("/orgs/{org}/repos/{repo}", func(c *Context) error {
-org = c.Param("org")
-repo = c.Param("repo")
-return nil
-})
+	r.GET("/orgs/{org}/repos/{repo}", func(c *Context) error {
+		org = c.Param("org")
+		repo = c.Param("repo")
+		return nil
+	})
 
-req := httptest.NewRequest(http.MethodGet, "/orgs/acme/repos/widget", nil)
-w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/orgs/acme/repos/widget", nil)
+	w := httptest.NewRecorder()
 
-r.ServeHTTP(w, req)
+	r.ServeHTTP(w, req)
 
-if org != "acme" {
-t.Errorf("Param(org) = %q, want %q", org, "acme")
-}
-if repo != "widget" {
-t.Errorf("Param(repo) = %q, want %q", repo, "widget")
-}
+	if org != "acme" {
+		t.Errorf("Param(org) = %q, want %q", org, "acme")
+	}
+	if repo != "widget" {
+		t.Errorf("Param(repo) = %q, want %q", repo, "widget")
+	}
 }
 
 func TestRouter_ErrorHandler(t *testing.T) {
-r := New()
-testErr := errors.New("test error")
+	r := New()
+	testErr := errors.New("test error")
 
-r.GET("/error", func(c *Context) error {
-return testErr
-})
+	r.GET("/error", func(c *Context) error {
+		return testErr
+	})
 
-req := httptest.NewRequest(http.MethodGet, "/error", nil)
-w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/error", nil)
+	w := httptest.NewRecorder()
 
-r.ServeHTTP(w, req)
+	r.ServeHTTP(w, req)
 
-if w.Code != http.StatusInternalServerError {
-t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
-}
-if !strings.Contains(w.Body.String(), "Internal Server Error") {
-t.Errorf("body = %q, want to contain 'Internal Server Error'", w.Body.String())
-}
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+	if !strings.Contains(w.Body.String(), "Internal Server Error") {
+		t.Errorf("body = %q, want to contain 'Internal Server Error'", w.Body.String())
+	}
 }
 
 func TestRouter_CustomErrorHandler(t *testing.T) {
-r := New()
-testErr := errors.New("custom error")
+	r := New()
+	testErr := errors.New("custom error")
 
-r.SetErrorHandler(func(c *Context, err error) {
-_ = c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
-})
+	r.SetErrorHandler(func(c *Context, err error) {
+		_ = c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	})
 
-r.GET("/error", func(c *Context) error {
-return testErr
-})
+	r.GET("/error", func(c *Context) error {
+		return testErr
+	})
 
-req := httptest.NewRequest(http.MethodGet, "/error", nil)
-w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/error", nil)
+	w := httptest.NewRecorder()
 
-r.ServeHTTP(w, req)
+	r.ServeHTTP(w, req)
 
-if w.Code != http.StatusBadRequest {
-t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
-}
-if !strings.Contains(w.Body.String(), "custom error") {
-t.Errorf("body = %q, want to contain 'custom error'", w.Body.String())
-}
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(w.Body.String(), "custom error") {
+		t.Errorf("body = %q, want to contain 'custom error'", w.Body.String())
+	}
 }
 
 func TestRouter_ErrorNotCalledWhenWritten(t *testing.T) {
-r := New()
-errorHandlerCalled := false
+	r := New()
+	errorHandlerCalled := false
 
-r.SetErrorHandler(func(c *Context, err error) {
-errorHandlerCalled = true
-})
+	r.SetErrorHandler(func(c *Context, err error) {
+		errorHandlerCalled = true
+	})
 
-r.GET("/error", func(c *Context) error {
-_ = c.JSON(http.StatusOK, map[string]string{"status": "ok"})
-return errors.New("this error should be ignored")
-})
+	r.GET("/error", func(c *Context) error {
+		_ = c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+		return errors.New("this error should be ignored")
+	})
 
-req := httptest.NewRequest(http.MethodGet, "/error", nil)
-w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/error", nil)
+	w := httptest.NewRecorder()
 
-r.ServeHTTP(w, req)
+	r.ServeHTTP(w, req)
 
-if errorHandlerCalled {
-t.Error("error handler was called even though response was already written")
-}
-if w.Code != http.StatusOK {
-t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
-}
+	if errorHandlerCalled {
+		t.Error("error handler was called even though response was already written")
+	}
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
 }
 
 func TestRouter_Group(t *testing.T) {
-r := New()
-called := false
+	r := New()
+	called := false
 
-api := r.Group("/api")
-api.GET("/users", func(c *Context) error {
-called = true
-return c.JSON(http.StatusOK, nil)
-})
+	api := r.Group("/api")
+	api.GET("/users", func(c *Context) error {
+		called = true
+		return c.JSON(http.StatusOK, nil)
+	})
 
-req := httptest.NewRequest(http.MethodGet, "/api/users", nil)
-w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/users", nil)
+	w := httptest.NewRecorder()
 
-r.ServeHTTP(w, req)
+	r.ServeHTTP(w, req)
 
-if !called {
-t.Error("grouped handler was not called")
-}
-if w.Code != http.StatusOK {
-t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
-}
+	if !called {
+		t.Error("grouped handler was not called")
+	}
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
 }
 
 func TestRouter_GroupNested(t *testing.T) {
-r := New()
-called := false
+	r := New()
+	called := false
 
-api := r.Group("/api")
-v1 := api.Group("/v1")
-v1.GET("/users", func(c *Context) error {
-called = true
-return nil
-})
+	api := r.Group("/api")
+	v1 := api.Group("/v1")
+	v1.GET("/users", func(c *Context) error {
+		called = true
+		return nil
+	})
 
-req := httptest.NewRequest(http.MethodGet, "/api/v1/users", nil)
-w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users", nil)
+	w := httptest.NewRecorder()
 
-r.ServeHTTP(w, req)
+	r.ServeHTTP(w, req)
 
-if !called {
-t.Error("nested grouped handler was not called")
-}
+	if !called {
+		t.Error("nested grouped handler was not called")
+	}
 }
 
 func TestRouteGroup_AllMethods(t *testing.T) {
-tests := []struct {
-method   string
-register func(g *RouteGroup, path string, h HandlerFunc)
-}{
-{http.MethodGet, (*RouteGroup).GET},
-{http.MethodPost, (*RouteGroup).POST},
-{http.MethodPut, (*RouteGroup).PUT},
-{http.MethodDelete, (*RouteGroup).DELETE},
-{http.MethodPatch, (*RouteGroup).PATCH},
-}
+	tests := []struct {
+		method   string
+		register func(g *RouteGroup, path string, h HandlerFunc)
+	}{
+		{http.MethodGet, (*RouteGroup).GET},
+		{http.MethodPost, (*RouteGroup).POST},
+		{http.MethodPut, (*RouteGroup).PUT},
+		{http.MethodDelete, (*RouteGroup).DELETE},
+		{http.MethodPatch, (*RouteGroup).PATCH},
+	}
 
-for _, tt := range tests {
-t.Run(tt.method, func(t *testing.T) {
-r := New()
-g := r.Group("/api")
-called := false
+	for _, tt := range tests {
+		t.Run(tt.method, func(t *testing.T) {
+			r := New()
+			g := r.Group("/api")
+			called := false
 
-tt.register(g, "/test", func(c *Context) error {
-called = true
-return nil
-})
+			tt.register(g, "/test", func(c *Context) error {
+				called = true
+				return nil
+			})
 
-req := httptest.NewRequest(tt.method, "/api/test", nil)
-w := httptest.NewRecorder()
+			req := httptest.NewRequest(tt.method, "/api/test", nil)
+			w := httptest.NewRecorder()
 
-r.ServeHTTP(w, req)
+			r.ServeHTTP(w, req)
 
-if !called {
-t.Errorf("%s handler was not called", tt.method)
-}
-})
-}
+			if !called {
+				t.Errorf("%s handler was not called", tt.method)
+			}
+		})
+	}
 }
 
 func TestRouter_Handler(t *testing.T) {
-r := New()
+	r := New()
 
-r.GET("/test", func(c *Context) error {
-return c.JSON(http.StatusOK, nil)
-})
+	r.GET("/test", func(c *Context) error {
+		return c.JSON(http.StatusOK, nil)
+	})
 
-handler := r.Handler()
-if handler == nil {
-t.Fatal("Handler() returned nil")
-}
+	handler := r.Handler()
+	if handler == nil {
+		t.Fatal("Handler() returned nil")
+	}
 
-req := httptest.NewRequest(http.MethodGet, "/test", nil)
-w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	w := httptest.NewRecorder()
 
-handler.ServeHTTP(w, req)
+	handler.ServeHTTP(w, req)
 
-if w.Code != http.StatusOK {
-t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
-}
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
 }
 
 func TestRouter_ServeHTTP(t *testing.T) {
-r := New()
-called := false
+	r := New()
+	called := false
 
-r.GET("/", func(c *Context) error {
-called = true
-return nil
-})
+	r.GET("/", func(c *Context) error {
+		called = true
+		return nil
+	})
 
-req := httptest.NewRequest(http.MethodGet, "/", nil)
-w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
 
-r.ServeHTTP(w, req)
+	r.ServeHTTP(w, req)
 
-if !called {
-t.Error("ServeHTTP did not route to handler")
-}
+	if !called {
+		t.Error("ServeHTTP did not route to handler")
+	}
 }
 
 func TestRouter_NotFound(t *testing.T) {
-r := New()
+	r := New()
 
-r.GET("/exists", func(c *Context) error {
-return nil
-})
+	r.GET("/exists", func(c *Context) error {
+		return nil
+	})
 
-req := httptest.NewRequest(http.MethodGet, "/notfound", nil)
-w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/notfound", nil)
+	w := httptest.NewRecorder()
 
-r.ServeHTTP(w, req)
+	r.ServeHTTP(w, req)
 
-if w.Code != http.StatusNotFound {
-t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
-}
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
 }
 
 func TestRouter_MethodNotAllowed(t *testing.T) {
-r := New()
+	r := New()
 
-r.GET("/resource", func(c *Context) error {
-return nil
-})
+	r.GET("/resource", func(c *Context) error {
+		return nil
+	})
 
-req := httptest.NewRequest(http.MethodPost, "/resource", nil)
-w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/resource", nil)
+	w := httptest.NewRecorder()
 
-r.ServeHTTP(w, req)
+	r.ServeHTTP(w, req)
 
-if w.Code != http.StatusMethodNotAllowed && w.Code != http.StatusNotFound {
-t.Errorf("status = %d, want 405 or 404", w.Code)
-}
+	if w.Code != http.StatusMethodNotAllowed && w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 405 or 404", w.Code)
+	}
 }
 
 func TestRouter_JSONRequest(t *testing.T) {
-r := New()
+	r := New()
 
-type Input struct {
-Name string `json:"name"`
-}
+	type Input struct {
+		Name string `json:"name"`
+	}
 
-r.POST("/echo", func(c *Context) error {
-var input Input
-if err := c.Bind(&input); err != nil {
-return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
-}
-return c.JSON(http.StatusOK, input)
-})
+	r.POST("/echo", func(c *Context) error {
+		var input Input
+		if err := c.Bind(&input); err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		}
+		return c.JSON(http.StatusOK, input)
+	})
 
-body := strings.NewReader(`{"name":"test"}`)
-req := httptest.NewRequest(http.MethodPost, "/echo", body)
-req.Header.Set("Content-Type", "application/json")
-w := httptest.NewRecorder()
+	body := strings.NewReader(`{"name":"test"}`)
+	req := httptest.NewRequest(http.MethodPost, "/echo", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
 
-r.ServeHTTP(w, req)
+	r.ServeHTTP(w, req)
 
-if w.Code != http.StatusOK {
-t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
-}
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
 
-want := `{"name":"test"}`
-got := strings.TrimSpace(w.Body.String())
-if got != want {
-t.Errorf("body = %q, want %q", got, want)
-}
+	want := `{"name":"test"}`
+	got := strings.TrimSpace(w.Body.String())
+	if got != want {
+		t.Errorf("body = %q, want %q", got, want)
+	}
 }
 
 func TestRouter_Middleware(t *testing.T) {
@@ -726,8 +726,8 @@ func TestRouter_Use_MultipleMiddleware(t *testing.T) {
 
 func TestRouter_PathValidation(t *testing.T) {
 	tests := []struct {
-		name       string
-		path       string
+		name        string
+		path        string
 		shouldPanic bool
 	}{
 		{"valid path", "/users", false},

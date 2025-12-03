@@ -144,7 +144,6 @@ func TestContext_Bind(t *testing.T) {
 	}
 }
 
-
 func TestContext_Query(t *testing.T) {
 	tests := []struct {
 		name     string
