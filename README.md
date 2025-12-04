@@ -25,6 +25,7 @@
 - **JSON Handling** - `Bind`, `BindStrict`, and `JSON` response helpers
 - **Static Files** - Serve directories with a single line
 - **Production Middleware** - Built-in `Recover` and `CORS` middleware
+- **Health Checks** - Liveness and readiness probes for Kubernetes
 - **Type-Safe Context** - Generic `GetType[T]` for dependency injection
 - **99%+ Test Coverage** - Battle-tested and production-ready
 
@@ -300,6 +301,65 @@ r.Use(rig.CORS(rig.CORSConfig{
     AllowHeaders: []string{"Content-Type", "Authorization"},
 }))
 ```
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
+## Health Checks
+
+Rig provides an opt-in health utility for liveness and readiness probes, perfect for Kubernetes deployments:
+
+```go
+func main() {
+    r := rig.New()
+    db := connectDB()
+
+    // Create the Health manager
+    health := rig.NewHealth()
+
+    // Add readiness check (don't send traffic if DB is down)
+    health.AddReadinessCheck("database", func() error {
+        return db.Ping()
+    })
+
+    // Add liveness check (is the app running?)
+    health.AddLivenessCheck("ping", func() error {
+        return nil // Always healthy
+    })
+
+    // Mount the handlers (user chooses the paths)
+    h := r.Group("/health")
+    h.GET("/live", health.LiveHandler())
+    h.GET("/ready", health.ReadyHandler())
+
+    r.Run(":8080")
+}
+```
+
+&nbsp;
+
+**Response format:**
+
+```json
+// GET /health/ready (all checks pass)
+{ "status": "OK", "checks": { "database": "OK" } }
+
+// GET /health/ready (a check fails)
+{ "status": "Service Unavailable", "checks": { "database": "FAIL: connection refused" } }
+```
+
+&nbsp;
+
+| Method | Description |
+|--------|-------------|
+| `NewHealth()` | Creates a new Health manager |
+| `AddReadinessCheck(name, fn)` | Adds a check for traffic readiness (DB, Redis, etc.) |
+| `AddLivenessCheck(name, fn)` | Adds a check for app liveness (deadlock detection, etc.) |
+| `LiveHandler()` | Returns a handler for liveness probes |
+| `ReadyHandler()` | Returns a handler for readiness probes |
 
 &nbsp;
 
