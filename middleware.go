@@ -2,6 +2,7 @@ package rig
 
 import (
 	"net/http"
+	"strings"
 )
 
 // Recover creates middleware that recovers from panics and returns a 500 error.
@@ -69,17 +70,30 @@ func DefaultCORS() MiddlewareFunc {
 //	    AllowHeaders: []string{"Content-Type", "Authorization"},
 //	}))
 func CORS(config CORSConfig) MiddlewareFunc {
+	// Pre-compute joined strings at middleware creation time
+	allowMethods := strings.Join(config.AllowMethods, ", ")
+	allowHeaders := strings.Join(config.AllowHeaders, ", ")
+
+	// Build a set for O(1) origin lookup
+	allowAllOrigins := false
+	originSet := make(map[string]struct{}, len(config.AllowOrigins))
+	for _, o := range config.AllowOrigins {
+		if o == "*" {
+			allowAllOrigins = true
+			break
+		}
+		originSet[o] = struct{}{}
+	}
+
 	return func(next HandlerFunc) HandlerFunc {
 		return func(c *Context) error {
-			// Check if the request origin is allowed
 			origin := c.GetHeader("Origin")
 			allowOrigin := ""
 
-			for _, o := range config.AllowOrigins {
-				if o == "*" || o == origin {
-					allowOrigin = o
-					break
-				}
+			if allowAllOrigins {
+				allowOrigin = "*"
+			} else if _, ok := originSet[origin]; ok {
+				allowOrigin = origin
 			}
 
 			if allowOrigin != "" {
@@ -88,8 +102,8 @@ func CORS(config CORSConfig) MiddlewareFunc {
 
 			// Handle Preflight OPTIONS request
 			if c.Method() == http.MethodOptions {
-				c.SetHeader("Access-Control-Allow-Methods", joinStrings(config.AllowMethods, ", "))
-				c.SetHeader("Access-Control-Allow-Headers", joinStrings(config.AllowHeaders, ", "))
+				c.SetHeader("Access-Control-Allow-Methods", allowMethods)
+				c.SetHeader("Access-Control-Allow-Headers", allowHeaders)
 				c.Status(http.StatusNoContent)
 				return nil
 			}
@@ -97,17 +111,4 @@ func CORS(config CORSConfig) MiddlewareFunc {
 			return next(c)
 		}
 	}
-}
-
-// joinStrings concatenates a slice of strings with a separator.
-// This is a simple helper to avoid importing the "strings" package.
-func joinStrings(items []string, sep string) string {
-	if len(items) == 0 {
-		return ""
-	}
-	result := items[0]
-	for i := 1; i < len(items); i++ {
-		result += sep + items[i]
-	}
-	return result
 }

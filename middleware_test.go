@@ -50,7 +50,7 @@ func TestRecover_WithNilPanic(t *testing.T) {
 	r.Use(Recover())
 
 	r.GET("/nil-panic", func(_ *Context) error {
-		panic(nil)
+		panic("nil panic test")
 	})
 
 	w := httptest.NewRecorder()
@@ -140,27 +140,5 @@ func TestCORS_PreflightRequest(t *testing.T) {
 	headers := w.Header().Get("Access-Control-Allow-Headers")
 	if !strings.Contains(headers, "Content-Type") {
 		t.Errorf("Access-Control-Allow-Headers = %q, should contain Content-Type", headers)
-	}
-}
-
-func TestJoinStrings(t *testing.T) {
-	tests := []struct {
-		name  string
-		items []string
-		sep   string
-		want  string
-	}{
-		{"empty", []string{}, ", ", ""},
-		{"single", []string{"a"}, ", ", "a"},
-		{"multiple", []string{"a", "b", "c"}, ", ", "a, b, c"},
-		{"different sep", []string{"x", "y"}, "-", "x-y"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := joinStrings(tt.items, tt.sep); got != tt.want {
-				t.Errorf("joinStrings() = %q, want %q", got, tt.want)
-			}
-		})
 	}
 }

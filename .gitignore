@@ -1,1 +1,9 @@
 .vscode/
+
+# Compiled binaries
+examples/basic-api/basic-api
+examples/health-checks/health-checks
+examples/swagger-ui/swagger-ui
+
+# Test coverage
+*.out
