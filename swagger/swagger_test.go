@@ -151,3 +151,64 @@ func TestSwagger_RegisterGroup(t *testing.T) {
 	}
 }
 
+func TestSwagger_NormalizePath(t *testing.T) {
+	tests := []struct {
+		name       string
+		pathPrefix string
+		wantPath   string
+	}{
+		{"empty path defaults to /docs", "", "/docs/"},
+		{"path without leading slash", "api-docs", "/api-docs/"},
+		{"path with trailing slash", "/docs/", "/docs/"},
+		{"normal path", "/swagger", "/swagger/"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := New(testSpec)
+			r := rig.New()
+			s.Register(r, tt.pathPrefix)
+
+			req := httptest.NewRequest(http.MethodGet, tt.wantPath, nil)
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Errorf("path %q: expected status %d, got %d", tt.wantPath, http.StatusOK, rec.Code)
+			}
+		})
+	}
+}
+
+func TestNewFromSwag_Fallback(t *testing.T) {
+	// NewFromSwag with non-existent instance should return fallback spec
+	s := NewFromSwag("non-existent-instance")
+	if s == nil {
+		t.Fatal("NewFromSwag returned nil")
+	}
+	if s.specJSON == "" {
+		t.Error("specJSON should not be empty")
+	}
+	// Should contain fallback spec
+	if !strings.Contains(s.specJSON, "openapi") {
+		t.Error("fallback spec should contain openapi")
+	}
+}
+
+func TestSwagger_ChainedBuilders(t *testing.T) {
+	s := New(testSpec).
+		WithTitle("Chained API").
+		WithDeepLinking(false).
+		WithDocExpansion("full")
+
+	if s.title != "Chained API" {
+		t.Errorf("expected title 'Chained API', got %q", s.title)
+	}
+	if s.deepLinking {
+		t.Error("expected deepLinking to be false")
+	}
+	if s.docExpansion != "full" {
+		t.Errorf("expected docExpansion 'full', got %q", s.docExpansion)
+	}
+}
+

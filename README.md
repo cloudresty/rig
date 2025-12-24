@@ -147,7 +147,7 @@ r.Use(Logger())          // Global - logs requests
 ### Built-in Middleware
 
 | Middleware | Description |
-|------------|-------------|
+| :--- | :--- |
 | `Recover()` | Catches panics and returns a 500 JSON error |
 | `DefaultCORS()` | Permissive CORS (allows all origins) |
 | `CORS(config)` | Configurable CORS with specific origins/methods/headers |
@@ -355,7 +355,7 @@ func main() {
 &nbsp;
 
 | Method | Description |
-|--------|-------------|
+| :--- | :--- |
 | `NewHealth()` | Creates a new Health manager |
 | `AddReadinessCheck(name, fn)` | Adds a check for traffic readiness (DB, Redis, etc.) |
 | `AddLivenessCheck(name, fn)` | Adds a check for app liveness (deadlock detection, etc.) |
@@ -422,7 +422,7 @@ sw.RegisterGroup(api, "/docs")
 ```
 
 | Method | Description |
-|--------|-------------|
+| :--- | :--- |
 | `New(specJSON)` | Creates Swagger UI with a JSON spec string |
 | `NewFromSwag(name)` | Creates Swagger UI from swaggo/swag registered spec |
 | `WithTitle(title)` | Sets the page title |
@@ -437,12 +437,41 @@ sw.RegisterGroup(api, "/docs")
 
 &nbsp;
 
+## Examples
+
+The `examples/` directory contains runnable examples:
+
+| Example | Description |
+| :--- | :--- |
+| [basic-api](examples/basic-api) | REST API with middleware, dependency injection, and route groups |
+| [health-checks](examples/health-checks) | Kubernetes-style liveness and readiness probes |
+| [swagger-ui](examples/swagger-ui) | API with integrated Swagger UI documentation |
+
+```bash
+# Run the basic API example
+cd examples/basic-api && go run main.go
+
+# Run the health checks example
+cd examples/health-checks && go run main.go
+# Test: curl http://localhost:8080/health/ready
+
+# Run the Swagger UI example
+cd examples/swagger-ui && go run main.go
+# Open http://localhost:8080/docs/
+```
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
 ## API Reference
 
 ### Context Methods
 
 | Method | Description |
-|--------|-------------|
+| :--- | :--- |
 | `Param(name)` | Get path parameter |
 | `Query(key)` | Get query parameter |
 | `QueryDefault(key, def)` | Get query parameter with default |
@@ -471,7 +500,7 @@ sw.RegisterGroup(api, "/docs")
 ### Router Methods
 
 | Method | Description |
-|--------|-------------|
+| :--- | :--- |
 | `New()` | Create a new router |
 | `Use(middleware...)` | Add global middleware |
 | `Handle(pattern, handler)` | Register a handler |
