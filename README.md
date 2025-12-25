@@ -26,6 +26,9 @@
 - **Static Files** - Serve directories with a single line
 - **Production Middleware** - Built-in `Recover` and `CORS` middleware
 - **Health Checks** - Liveness and readiness probes for Kubernetes
+- **Authentication** - API Key and Bearer Token middleware (`auth/` sub-package)
+- **Request ID** - ULID-based request tracking (`requestid/` sub-package)
+- **Logging** - Structured request logging with JSON support (`logger/` sub-package)
 - **Swagger UI** - Optional sub-package for API documentation
 - **Type-Safe Context** - Generic `GetType[T]` for dependency injection
 - **99%+ Test Coverage** - Battle-tested and production-ready
@@ -151,6 +154,16 @@ r.Use(Logger())          // Global - logs requests
 | `Recover()` | Catches panics and returns a 500 JSON error |
 | `DefaultCORS()` | Permissive CORS (allows all origins) |
 | `CORS(config)` | Configurable CORS with specific origins/methods/headers |
+
+&nbsp;
+
+**Additional middleware sub-packages** (see sections below):
+
+| Package | Description |
+| :--- | :--- |
+| `auth/` | API Key and Bearer Token authentication |
+| `requestid/` | ULID-based request ID generation |
+| `logger/` | Structured request logging (text/JSON) |
 
 &nbsp;
 
@@ -445,6 +458,184 @@ sw.RegisterGroup(api, "/docs")
 
 &nbsp;
 
+## Authentication Middleware
+
+The `auth/` sub-package provides API Key and Bearer Token authentication:
+
+```bash
+go get github.com/cloudresty/rig/auth
+```
+
+&nbsp;
+
+### API Key Authentication
+
+```go
+import "github.com/cloudresty/rig/auth"
+
+// Simple: validate against a list of keys
+api := r.Group("/api")
+api.Use(auth.APIKeySimple("key1", "key2", "key3"))
+
+// Advanced: custom validation with identity
+api.Use(auth.APIKey(auth.APIKeyConfig{
+    Name:   "X-API-Key",        // Header name (default)
+    Source: "header",           // "header" or "query"
+    Validator: func(key string) (identity string, valid bool) {
+        if key == os.Getenv("API_KEY") {
+            return "my-service", true
+        }
+        return "", false
+    },
+}))
+
+// In handlers, get the authenticated identity
+r.GET("/profile", func(c *rig.Context) error {
+    identity := auth.GetIdentity(c)  // Returns identity from Validator
+    method := auth.GetMethod(c)      // Returns "api_key" or "bearer"
+    return c.JSON(http.StatusOK, map[string]string{"user": identity})
+})
+```
+
+&nbsp;
+
+### Bearer Token Authentication
+
+```go
+api.Use(auth.Bearer(auth.BearerConfig{
+    Realm: "API",
+    Validator: func(token string) (identity string, valid bool) {
+        // Validate JWT or lookup token
+        claims, err := validateJWT(token)
+        if err != nil {
+            return "", false
+        }
+        return claims.UserID, true
+    },
+}))
+```
+
+&nbsp;
+
+| Function | Description |
+| :--- | :--- |
+| `APIKeySimple(keys...)` | Simple API key validation (constant-time comparison) |
+| `APIKey(config)` | Configurable API key middleware |
+| `Bearer(config)` | Bearer token middleware (RFC 6750) |
+| `GetIdentity(c)` | Get authenticated identity from context |
+| `GetMethod(c)` | Get auth method ("api_key" or "bearer") |
+| `IsAuthenticated(c)` | Check if request is authenticated |
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
+## Request ID Middleware
+
+The `requestid/` sub-package generates unique request IDs using ULIDs:
+
+```bash
+go get github.com/cloudresty/rig/requestid
+```
+
+&nbsp;
+
+```go
+import "github.com/cloudresty/rig/requestid"
+
+r := rig.New()
+
+// Add request ID middleware (generates ULID for each request)
+r.Use(requestid.New())
+
+// With custom configuration
+r.Use(requestid.New(requestid.Config{
+    Header:     "X-Request-ID",  // Response header (default)
+    TrustProxy: true,            // Trust incoming X-Request-ID header
+    Generator: func() (string, error) {
+        return uuid.New().String(), nil  // Use UUID instead of ULID
+    },
+}))
+
+// In handlers, get the request ID
+r.GET("/", func(c *rig.Context) error {
+    reqID := requestid.Get(c)
+    return c.JSON(http.StatusOK, map[string]string{
+        "request_id": reqID,
+    })
+})
+```
+
+&nbsp;
+
+| Function | Description |
+| :--- | :--- |
+| `New()` | Create middleware with default config |
+| `New(config)` | Create middleware with custom config |
+| `Get(c)` | Get request ID from context |
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
+## Logger Middleware
+
+The `logger/` sub-package provides structured request logging:
+
+```bash
+go get github.com/cloudresty/rig/logger
+```
+
+&nbsp;
+
+```go
+import "github.com/cloudresty/rig/logger"
+
+r := rig.New()
+
+// Add request ID first (logger will include it)
+r.Use(requestid.New())
+
+// Add logger middleware
+r.Use(logger.New(logger.Config{
+    Format:    logger.FormatJSON,              // FormatText or FormatJSON
+    Output:    os.Stdout,                       // io.Writer
+    SkipPaths: []string{"/health", "/ready"},  // Don't log these paths
+}))
+```
+
+&nbsp;
+
+**Text format output:**
+
+```text
+2024/01/15 10:30:45 | 200 |    1.234ms | 192.168.1.1 | GET /api/users | req_id: 01HQ...
+```
+
+**JSON format output:**
+
+```json
+{"time":"2024-01-15T10:30:45Z","status":200,"latency":"1.234ms","latency_ms":1.234,"client_ip":"192.168.1.1","method":"GET","path":"/api/users","request_id":"01HQ..."}
+```
+
+&nbsp;
+
+| Option | Description |
+| :--- | :--- |
+| `Format` | `FormatText` (default) or `FormatJSON` |
+| `Output` | `io.Writer` for log output (default: `os.Stdout`) |
+| `SkipPaths` | Paths to exclude from logging (e.g., health checks) |
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
 ## Examples
 
 The `examples/` directory contains runnable examples:
@@ -454,21 +645,8 @@ The `examples/` directory contains runnable examples:
 | [basic-api](examples/basic-api) | REST API with middleware, dependency injection, and route groups |
 | [health-checks](examples/health-checks) | Kubernetes-style liveness and readiness probes |
 | [swagger-ui](examples/swagger-ui) | API with integrated Swagger UI documentation |
-
-&nbsp;
-
-```bash
-# Run the basic API example
-cd examples/basic-api && go run main.go
-
-# Run the health checks example
-cd examples/health-checks && go run main.go
-# Test: curl http://localhost:8080/health/ready
-
-# Run the Swagger UI example
-cd examples/swagger-ui && go run main.go
-# Open http://localhost:8080/docs/
-```
+| [auth-middleware](examples/auth-middleware) | API Key authentication using the `auth/` package |
+| [logging](examples/logging) | Request logging with request ID tracking |
 
 &nbsp;
 
