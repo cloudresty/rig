@@ -148,7 +148,6 @@ func TestNew_ErrorLogging(t *testing.T) {
 	}
 }
 
-
 func TestNew_WithRequestID(t *testing.T) {
 	var buf bytes.Buffer
 

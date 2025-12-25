@@ -358,4 +358,3 @@ func containsAt(s, substr string) bool {
 	}
 	return false
 }
-

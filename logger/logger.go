@@ -258,4 +258,3 @@ func getClientIP(c *rig.Context) string {
 	}
 	return addr
 }
-

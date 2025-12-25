@@ -136,4 +136,3 @@ func Get(c *rig.Context) string {
 	}
 	return ""
 }
-

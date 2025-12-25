@@ -291,4 +291,3 @@ func TestNew_CustomHeaderWithTrustProxy(t *testing.T) {
 		t.Error("Response should have custom header with incoming ID")
 	}
 }
-
