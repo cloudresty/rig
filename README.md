@@ -376,6 +376,8 @@ Rig provides optional Swagger UI support via a separate sub-package to keep the 
 go get github.com/cloudresty/rig/swagger
 ```
 
+&nbsp;
+
 ### Basic Usage with swaggo/swag
 
 ```go
@@ -402,6 +404,8 @@ func main() {
 // Access Swagger UI at http://localhost:8080/docs/
 ```
 
+&nbsp;
+
 ### Usage with Custom Spec
 
 ```go
@@ -412,6 +416,8 @@ sw := swagger.New(spec).
 sw.Register(r, "/api-docs")
 ```
 
+&nbsp;
+
 ### Usage with Route Groups
 
 ```go
@@ -420,6 +426,8 @@ sw := swagger.NewFromSwag("swagger")
 sw.RegisterGroup(api, "/docs")
 // Access at /api/v1/docs/
 ```
+
+&nbsp;
 
 | Method | Description |
 | :--- | :--- |
@@ -446,6 +454,8 @@ The `examples/` directory contains runnable examples:
 | [basic-api](examples/basic-api) | REST API with middleware, dependency injection, and route groups |
 | [health-checks](examples/health-checks) | Kubernetes-style liveness and readiness probes |
 | [swagger-ui](examples/swagger-ui) | API with integrated Swagger UI documentation |
+
+&nbsp;
 
 ```bash
 # Run the basic API example
