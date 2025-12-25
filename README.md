@@ -308,13 +308,34 @@ r.GET("/users", func(c *rig.Context) error {
 // Permissive (all origins)
 r.Use(rig.DefaultCORS())
 
-// Restrictive
+// Restrictive with exact origins
 r.Use(rig.CORS(rig.CORSConfig{
     AllowOrigins: []string{"https://myapp.com", "https://admin.myapp.com"},
     AllowMethods: []string{"GET", "POST", "PUT", "DELETE"},
     AllowHeaders: []string{"Content-Type", "Authorization"},
 }))
+
+// Wildcard subdomain support
+r.Use(rig.CORS(rig.CORSConfig{
+    AllowOrigins: []string{
+        "https://*.myapp.com",           // Matches any subdomain
+        "https://*.staging.myapp.com",   // Matches nested subdomains
+        "https://api.production.com",    // Exact match also works
+    },
+    AllowMethods: []string{"GET", "POST", "PUT", "DELETE"},
+    AllowHeaders: []string{"Content-Type", "Authorization"},
+}))
 ```
+
+&nbsp;
+
+**AllowOrigins patterns:**
+
+| Pattern | Matches | Does Not Match |
+| :--- | :--- | :--- |
+| `"*"` | All origins | - |
+| `"https://example.com"` | Exact match only | `https://sub.example.com` |
+| `"https://*.example.com"` | `https://app.example.com`, `https://a.b.example.com` | `https://example.com`, `http://app.example.com` |
 
 &nbsp;
 
