@@ -26,6 +26,7 @@
 - **Static Files** - Serve directories with a single line
 - **Production Middleware** - Built-in `Recover` and `CORS` middleware
 - **Health Checks** - Liveness and readiness probes for Kubernetes
+- **HTML Templates** - Template rendering with layouts, partials, embed.FS, and content negotiation (`render/` sub-package)
 - **Authentication** - API Key and Bearer Token middleware (`auth/` sub-package)
 - **Request ID** - ULID-based request tracking (`requestid/` sub-package)
 - **Logging** - Structured request logging with JSON support (`logger/` sub-package)
@@ -657,6 +658,380 @@ r.Use(logger.New(logger.Config{
 
 &nbsp;
 
+## HTML Template Rendering
+
+The `render` sub-package provides HTML template rendering with layouts, partials, hot reloading, and content negotiation.
+
+```bash
+go get github.com/cloudresty/rig/render
+```
+
+&nbsp;
+
+### Basic Usage
+
+```go
+import (
+    "github.com/cloudresty/rig"
+    "github.com/cloudresty/rig/render"
+)
+
+func main() {
+    engine := render.New(render.Config{
+        Directory: "./templates",
+    })
+
+    r := rig.New()
+    r.Use(engine.Middleware())
+
+    r.GET("/", func(c *rig.Context) error {
+        return render.HTML(c, http.StatusOK, "home", map[string]any{
+            "Title": "Welcome",
+            "User":  "John",
+        })
+    })
+
+    r.Run(":8080")
+}
+```
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
+### Embedded Templates (embed.FS)
+
+For single-binary deployments, embed templates directly into your Go binary:
+
+```go
+import (
+    "embed"
+    "github.com/cloudresty/rig/render"
+)
+
+//go:embed templates/*
+var templateFS embed.FS
+
+func main() {
+    engine := render.New(render.Config{
+        FileSystem: templateFS,
+        Directory:  "templates",
+    })
+    // Templates are now compiled into the binary!
+}
+```
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
+### With Layouts
+
+```go
+engine := render.New(render.Config{
+    Directory: "./templates",
+    Layout:    "layouts/base", // Base layout template
+})
+```
+
+&nbsp;
+
+Layout template (`templates/layouts/base.html`):
+
+```html
+<!DOCTYPE html>
+<html>
+<head><title>{{.Data.Title}}</title></head>
+<body>
+    <header>My Site</header>
+    <main>{{.Content}}</main>
+    <footer>© 2026</footer>
+</body>
+</html>
+```
+
+&nbsp;
+
+Page template (`templates/home.html`):
+
+```html
+<h1>Welcome, {{.User}}!</h1>
+```
+
+&nbsp;
+
+**Layout Data Access:**
+
+In layouts, data is available via `{{.Data}}` (works with both structs and maps):
+
+| Expression | Description |
+| :--- | :--- |
+| `{{.Content}}` | Rendered page content |
+| `{{.Data.Title}}` | Access data fields (works with structs!) |
+| `{{.Title}}` | Direct access (backward compatible with maps) |
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
+### Partials
+
+Templates starting with underscore (`_`) are automatically treated as partials and available to all templates:
+
+```text
+templates/
+├── _sidebar.html    ← Partial (available everywhere)
+├── _footer.html     ← Partial (available everywhere)
+├── home.html
+└── about.html
+```
+
+&nbsp;
+
+Use partials in any template:
+
+```html
+<div class="page">
+    {{template "_sidebar" .}}
+    <main>{{.Content}}</main>
+    {{template "_footer" .}}
+</div>
+```
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
+### JSON and XML Responses
+
+Render JSON or XML directly without templates:
+
+```go
+// JSON response
+r.GET("/api/users", func(c *rig.Context) error {
+    return render.JSON(c, http.StatusOK, users)
+})
+
+// XML response
+r.GET("/api/users.xml", func(c *rig.Context) error {
+    return render.XML(c, http.StatusOK, users)
+})
+```
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
+### Content Negotiation
+
+Use `Auto()` to automatically select the response format based on the `Accept` header:
+
+```go
+r.GET("/users", func(c *rig.Context) error {
+    // Returns HTML for browsers, JSON for API clients
+    return render.Auto(c, http.StatusOK, "users/list", users)
+})
+```
+
+&nbsp;
+
+| Accept Header | Response Format |
+| :--- | :--- |
+| `application/json` | JSON |
+| `application/xml` or `text/xml` | XML |
+| `text/html` or other | HTML (if template provided) |
+| No template provided | JSON (fallback) |
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
+### Error Pages (Production)
+
+Use `HTMLSafe()` to automatically render a pretty error page when template rendering fails:
+
+```go
+r.GET("/page", func(c *rig.Context) error {
+    return render.HTMLSafe(c, http.StatusOK, "page", data, "errors/500")
+})
+```
+
+&nbsp;
+
+If `"page"` fails to render, it automatically falls back to `"errors/500"` with error details:
+
+```html
+<!-- templates/errors/500.html -->
+<h1>Something went wrong</h1>
+<p>Error: {{.Error}}</p>
+<p>Status: {{.StatusCode}}</p>
+```
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
+### Development Mode
+
+Enable hot reloading during development:
+
+```go
+engine := render.New(render.Config{
+    Directory: "./templates",
+    DevMode:   true, // Reloads templates on each request
+})
+```
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
+### Custom Template Functions
+
+```go
+engine := render.New(render.Config{
+    Directory: "./templates",
+    Funcs: template.FuncMap{
+        "upper": strings.ToUpper,
+        "formatDate": func(t time.Time) string {
+            return t.Format("Jan 2, 2006")
+        },
+    },
+})
+// Or use chained methods:
+engine.AddFunc("lower", strings.ToLower)
+```
+
+&nbsp;
+
+Use in templates: `{{upper .Name}}` or `{{formatDate .CreatedAt}}`
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
+### Built-in Functions
+
+| Function | Description | Usage |
+| :--- | :--- | :--- |
+| `safe` | Render trusted HTML without escaping | `{{safe .RawHTML}}` |
+| `safeAttr` | Render trusted HTML attribute | `{{safeAttr .Attr}}` |
+| `safeURL` | Render trusted URL | `{{safeURL .Link}}` |
+| `dump` | Debug helper - outputs data as formatted JSON | `{{dump .}}` |
+
+&nbsp;
+
+The `dump` function is invaluable during development:
+
+```html
+<!-- Debug: see what data was passed to the template -->
+{{dump .Data}}
+```
+
+Outputs:
+
+```html
+<pre>{
+  "Title": "My Page",
+  "User": {
+    "Name": "John"
+  }
+}</pre>
+```
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
+### Using Sprig Functions
+
+For 100+ additional template functions (string manipulation, math, dates, etc.), integrate [Sprig](https://github.com/Masterminds/sprig):
+
+```go
+import "github.com/Masterminds/sprig/v3"
+
+engine := render.New(render.Config{
+    Directory: "./templates",
+})
+engine.AddFuncs(sprig.FuncMap())
+```
+
+&nbsp;
+
+Now you can use functions like `{{.Name | upper}}`, `{{now | date "2006-01-02"}}`, and many more.
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
+### Custom Delimiters (Vue.js / Angular / Alpine.js)
+
+When using frontend frameworks that also use `{{ }}` syntax, configure custom delimiters:
+
+```go
+engine := render.New(render.Config{
+    Directory: "./templates",
+    Delims:    []string{"[[", "]]"}, // Use [[ ]] for Go templates
+})
+```
+
+&nbsp;
+
+Now your templates can mix Go and Vue/Angular syntax:
+
+```html
+<div>
+    <!-- Go template (rendered on server) -->
+    <h1>[[ .Title ]]</h1>
+
+    <!-- Vue.js binding (rendered on client) -->
+    <p>{{ message }}</p>
+</div>
+```
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
+### Debugging
+
+List loaded templates and partials:
+
+```go
+engine.TemplateNames() // Returns all template names
+engine.PartialNames()  // Returns all partial names (files starting with _)
+```
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
 ## Examples
 
 The `examples/` directory contains runnable examples:
@@ -668,6 +1043,7 @@ The `examples/` directory contains runnable examples:
 | [swagger-ui](examples/swagger-ui) | API with integrated Swagger UI documentation |
 | [auth-middleware](examples/auth-middleware) | API Key authentication using the `auth/` package |
 | [logging](examples/logging) | Request logging with request ID tracking |
+| [render-templates](examples/render-templates) | HTML templates with layouts, partials, and content negotiation |
 
 &nbsp;
 
@@ -742,6 +1118,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 [Website](https://cloudresty.com) &nbsp;|&nbsp; [LinkedIn](https://www.linkedin.com/company/cloudresty) &nbsp;|&nbsp; [BlueSky](https://bsky.app/profile/cloudresty.com) &nbsp;|&nbsp; [GitHub](https://github.com/cloudresty) &nbsp;|&nbsp; [Docker Hub](https://hub.docker.com/u/cloudresty)
 
-<sub>&copy; 2025 Cloudresty</sub>
+<sub>&copy; Cloudresty - All rights reserved</sub>
 
 &nbsp;

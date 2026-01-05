@@ -1,0 +1,18 @@
+<h2>About This Demo</h2>
+
+<div class="card">
+    <h3>Application Info</h3>
+    <p><strong>Name:</strong> {{.Name}}</p>
+    <p><strong>Version:</strong> {{.Version}}</p>
+    <p><strong>Description:</strong> {{.Description}}</p>
+</div>
+
+<div class="card">
+    <h3>Struct Data in Layouts</h3>
+    <p>This page demonstrates passing a <strong>struct</strong> (not a map) to the template.</p>
+    <p>In the layout, data is accessed via <code>{{"{{"}} .Data.Title {{"}}"}}</code></p>
+    <p>In the page template, data is accessed directly via <code>{{"{{"}} .Name {{"}}"}}</code></p>
+</div>
+
+<a href="/" class="btn">← Back to Home</a>
+

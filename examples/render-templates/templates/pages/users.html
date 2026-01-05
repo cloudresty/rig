@@ -1,0 +1,33 @@
+<h2>Users List</h2>
+
+<p>This endpoint supports content negotiation. Try:</p>
+<ul>
+    <li><code>curl -H "Accept: application/json" http://localhost:8080/users</code></li>
+    <li><code>curl -H "Accept: application/xml" http://localhost:8080/users</code></li>
+    <li><code>curl -H "Accept: text/html" http://localhost:8080/users</code></li>
+</ul>
+
+<div class="card">
+    <h3>Users</h3>
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr style="background: #e2e8f0;">
+                <th style="padding: 10px; text-align: left;">ID</th>
+                <th style="padding: 10px; text-align: left;">Name</th>
+                <th style="padding: 10px; text-align: left;">Email</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{range .Users}}
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+                <td style="padding: 10px;">{{.ID}}</td>
+                <td style="padding: 10px;">{{.Name}}</td>
+                <td style="padding: 10px;">{{.Email}}</td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+</div>
+
+<a href="/" class="btn">← Back to Home</a>
+

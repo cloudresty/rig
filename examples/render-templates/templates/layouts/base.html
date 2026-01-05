@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Data.Title}} - Rig Render Demo</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, -apple-system, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 800px; margin: 0 auto; padding: 20px; }
+        header { background: #2563eb; color: white; padding: 20px 0; margin-bottom: 30px; }
+        header h1 { text-align: center; }
+        nav { background: #1e40af; padding: 10px 0; }
+        nav ul { list-style: none; display: flex; justify-content: center; gap: 20px; }
+        nav a { color: white; text-decoration: none; padding: 5px 15px; border-radius: 5px; }
+        nav a:hover { background: rgba(255,255,255,0.2); }
+        main { min-height: 400px; }
+        footer { margin-top: 50px; padding: 20px 0; border-top: 1px solid #ddd; text-align: center; color: #666; }
+        .card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 15px 0; }
+        .btn { display: inline-block; padding: 10px 20px; background: #2563eb; color: white; text-decoration: none; border-radius: 5px; }
+        .btn:hover { background: #1d4ed8; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>🚀 Rig Render Demo</h1>
+        </div>
+    </header>
+    
+    <nav>
+        <ul>
+            <li><a href="/">Home</a></li>
+            <li><a href="/about">About</a></li>
+            <li><a href="/users">Users (JSON)</a></li>
+            <li><a href="/debug">Debug</a></li>
+        </ul>
+    </nav>
+    
+    <main class="container">
+        {{.Content}}
+    </main>
+    
+    <footer>
+        <div class="container">
+            {{template "_footer" .}}
+        </div>
+    </footer>
+</body>
+</html>
+
