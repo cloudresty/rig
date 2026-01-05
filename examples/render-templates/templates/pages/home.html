@@ -1,0 +1,26 @@
+<h2>Welcome to Rig Render!</h2>
+
+<div class="card">
+    <h3>Features Demonstrated</h3>
+    <ul>
+        <li>✅ <strong>Layouts</strong> - This page uses <code>layouts/base.html</code></li>
+        <li>✅ <strong>Partials</strong> - Footer uses the <code>_footer.html</code> partial</li>
+        <li>✅ <strong>Data Binding</strong> - Message: <em>{{.Message}}</em></li>
+        <li>✅ <strong>Content Negotiation</strong> - Try <code>Accept: application/json</code> header</li>
+        <li>✅ <strong>Hot Reloading</strong> - Running in DevMode</li>
+    </ul>
+</div>
+
+<div class="card">
+    <h3>Try These Endpoints</h3>
+    <ul>
+        <li><code>GET /</code> - This page (HTML)</li>
+        <li><code>GET /about</code> - About page with struct data</li>
+        <li><code>GET /users</code> - Content negotiation (HTML/JSON/XML)</li>
+        <li><code>GET /debug</code> - Debug page with <code>dump</code> helper</li>
+        <li><code>GET /api/users</code> - JSON API endpoint</li>
+    </ul>
+</div>
+
+<p>Current time: <strong>{{.Time}}</strong></p>
+
