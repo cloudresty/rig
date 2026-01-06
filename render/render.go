@@ -483,6 +483,38 @@ func (e *Engine) Render(name string, data any) (string, error) {
 	return result, nil
 }
 
+// RenderPartial renders a partial template by name with the given data.
+// Unlike Render, this looks up the template in the shared partials set
+// and does not wrap the output in a layout.
+//
+// Partial names are the template names as loaded (e.g., "_header" or "partials/nav").
+// Use PartialNames() to see all available partials.
+func (e *Engine) RenderPartial(name string, data any) (string, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	if e.partials == nil {
+		return "", fmt.Errorf("no partials loaded; ensure SharedDirs is configured or use _prefix naming")
+	}
+
+	// Look up the template in the partials set
+	tmpl := e.partials.Lookup(name)
+	if tmpl == nil {
+		return "", fmt.Errorf("partial %q not found", name)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("failed to execute partial %s: %w", name, err)
+	}
+
+	result := buf.String()
+	if e.config.Minify {
+		result = minifyHTML(result)
+	}
+	return result, nil
+}
+
 // HTML renders a template and writes it as an HTML response.
 // It retrieves the engine from the context (set by Middleware).
 func HTML(c *rig.Context, status int, name string, data any) error {
@@ -506,6 +538,42 @@ func HTML(c *rig.Context, status int, name string, data any) error {
 // This is useful when you don't want to use middleware.
 func HTMLDirect(c *rig.Context, engine *Engine, status int, name string, data any) error {
 	content, err := engine.Render(name, data)
+	if err != nil {
+		return err
+	}
+
+	c.SetHeader("Content-Type", ContentTypeHTML)
+	c.Status(status)
+	_, err = c.WriteString(content)
+	return err
+}
+
+// Partial renders a partial template (without layout) and writes it as an HTML response.
+// This is commonly used for HTMX requests, dynamic widgets, or AJAX updates where
+// you only need a fragment of HTML, not the full page shell.
+//
+// It retrieves the engine from the context (set by Middleware).
+func Partial(c *rig.Context, status int, name string, data any) error {
+	engine := GetEngine(c)
+	if engine == nil {
+		return fmt.Errorf("render engine not found in context; did you forget to use engine.Middleware()?")
+	}
+
+	content, err := engine.RenderPartial(name, data)
+	if err != nil {
+		return err
+	}
+
+	c.SetHeader("Content-Type", ContentTypeHTML)
+	c.Status(status)
+	_, err = c.WriteString(content)
+	return err
+}
+
+// PartialDirect renders a partial template using the provided engine directly.
+// This is useful when you don't want to use middleware.
+func PartialDirect(c *rig.Context, engine *Engine, status int, name string, data any) error {
+	content, err := engine.RenderPartial(name, data)
 	if err != nil {
 		return err
 	}

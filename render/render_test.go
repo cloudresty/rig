@@ -574,6 +574,91 @@ func TestHTMLDirect(t *testing.T) {
 	}
 }
 
+func TestPartial(t *testing.T) {
+	engine := New(Config{
+		Directory: "./testdata/templates",
+	})
+
+	if err := engine.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	r := rig.New()
+	r.Use(engine.Middleware())
+
+	r.GET("/fragment", func(c *rig.Context) error {
+		return Partial(c, http.StatusOK, "_footer", nil)
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/fragment", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != ContentTypeHTML {
+		t.Errorf("Content-Type = %q, want %q", contentType, ContentTypeHTML)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "<footer>") {
+		t.Errorf("Body should contain footer, got: %s", body)
+	}
+	if !strings.Contains(body, "2025 Test Company") {
+		t.Errorf("Body should contain footer content, got: %s", body)
+	}
+}
+
+func TestPartial_NoEngine(t *testing.T) {
+	r := rig.New()
+	// No middleware - engine not in context
+
+	r.GET("/fragment", func(c *rig.Context) error {
+		return Partial(c, http.StatusOK, "_footer", nil)
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/fragment", nil)
+	r.ServeHTTP(w, req)
+
+	// Should return 500 due to error
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestPartialDirect(t *testing.T) {
+	engine := New(Config{
+		Directory: "./testdata/templates",
+	})
+
+	if err := engine.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	r := rig.New()
+
+	r.GET("/fragment", func(c *rig.Context) error {
+		return PartialDirect(c, engine, http.StatusOK, "_footer", nil)
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/fragment", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "<footer>") {
+		t.Errorf("Body should contain footer, got: %s", body)
+	}
+}
+
 func TestGetEngine(t *testing.T) {
 	engine := New(Config{
 		Directory: "./testdata/templates",
@@ -714,6 +799,115 @@ func TestEngine_Partials(t *testing.T) {
 	}
 	if !strings.Contains(result, "2025 Test Company") {
 		t.Errorf("Result should contain footer partial, got: %s", result)
+	}
+}
+
+func TestEngine_RenderPartial(t *testing.T) {
+	engine := New(Config{
+		Directory: "./testdata/templates",
+	})
+
+	if err := engine.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// Render a partial directly (using existing _footer partial)
+	result, err := engine.RenderPartial("_footer", nil)
+	if err != nil {
+		t.Fatalf("RenderPartial() error = %v", err)
+	}
+
+	if !strings.Contains(result, "2025 Test Company") {
+		t.Errorf("RenderPartial should render footer, got: %s", result)
+	}
+	if !strings.Contains(result, "<footer>") {
+		t.Errorf("RenderPartial should contain footer tag, got: %s", result)
+	}
+}
+
+func TestEngine_RenderPartial_NotFound(t *testing.T) {
+	engine := New(Config{
+		Directory: "./testdata/templates",
+	})
+
+	if err := engine.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	_, err := engine.RenderPartial("nonexistent", nil)
+	if err == nil {
+		t.Error("RenderPartial() should return error for nonexistent partial")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("Error should mention 'not found', got: %v", err)
+	}
+}
+
+func TestEngine_RenderPartial_NoPartials(t *testing.T) {
+	// Engine with no partials loaded
+	testFS := fstest.MapFS{
+		"page.html": {Data: []byte("<p>No partials here</p>")},
+	}
+
+	engine := New(Config{
+		FileSystem: testFS,
+		Directory:  ".",
+	})
+
+	if err := engine.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	_, err := engine.RenderPartial("_header", nil)
+	if err == nil {
+		t.Error("RenderPartial() should return error when no partials loaded")
+	}
+	if !strings.Contains(err.Error(), "no partials loaded") {
+		t.Errorf("Error should mention 'no partials loaded', got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "SharedDirs") {
+		t.Errorf("Error should mention 'SharedDirs' for DX, got: %v", err)
+	}
+}
+
+func TestEngine_RenderPartial_WithMinify(t *testing.T) {
+	testFS := fstest.MapFS{
+		"_card.html": {Data: []byte(`<div class="card">
+	<h2>{{ .Title }}</h2>
+	<p>{{ .Body }}</p>
+</div>`)},
+		"page.html": {Data: []byte("<p>page</p>")},
+	}
+
+	engine := New(Config{
+		FileSystem: testFS,
+		Directory:  ".",
+		Minify:     true,
+	})
+
+	if err := engine.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	result, err := engine.RenderPartial("_card", map[string]any{
+		"Title": "Card Title",
+		"Body":  "Card body text",
+	})
+	if err != nil {
+		t.Fatalf("RenderPartial() error = %v", err)
+	}
+
+	// Check that content is present
+	if !strings.Contains(result, "Card Title") {
+		t.Errorf("Result should contain title, got: %s", result)
+	}
+	if !strings.Contains(result, "Card body text") {
+		t.Errorf("Result should contain body, got: %s", result)
+	}
+
+	// Check minification occurred (no newlines between block elements)
+	if strings.Contains(result, ">\n<") {
+		t.Errorf("Result should be minified (no newlines between tags), got: %s", result)
 	}
 }
 
