@@ -26,6 +26,7 @@
 - **Static Files** - Serve directories with a single line
 - **Production Middleware** - Built-in `Recover`, `CORS`, and `Timeout` middleware
 - **Production-Safe Timeouts** - Server and request timeouts with Slowloris protection
+- **Graceful Shutdown** - Zero-downtime deployments with `RunGracefully()`
 - **Health Checks** - Liveness and readiness probes with timeout support for Kubernetes
 - **HTML Templates** - Template rendering with layouts, partials, embed.FS, and content negotiation (`render/` sub-package)
 - **Authentication** - API Key and Bearer Token middleware (`auth/` sub-package)
@@ -515,6 +516,61 @@ r.Use(rig.TimeoutWithConfig(rig.TimeoutConfig{
 > Handlers must check `c.Context()` for this to work effectively.
 > Use `db.QueryContext(c.Context(), ...)` instead of `db.Query(...)`.</br>
 > &nbsp;
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
+## Graceful Shutdown
+
+Rig provides zero-downtime deployment support with `RunGracefully()`. When the server receives a shutdown signal (SIGINT or SIGTERM), it:
+
+1. Stops accepting new connections
+2. Waits for in-flight requests to complete
+3. Exits cleanly after the timeout
+
+This prevents dropped connections and 502 errors during deployments.
+
+```go
+func main() {
+    r := rig.New()
+
+    r.GET("/", func(c *rig.Context) error {
+        time.Sleep(2 * time.Second) // Simulate work
+        return c.JSON(http.StatusOK, map[string]string{"status": "done"})
+    })
+
+    // Ctrl+C will wait for the 2s request to finish before exiting
+    if err := r.RunGracefully(":8080"); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+&nbsp;
+
+| Method | Description |
+| :--- | :--- |
+| `Run(addr)` | Simple start for development/testing |
+| `RunGracefully(addr)` | Production-ready with graceful shutdown (recommended) |
+| `RunWithGracefulShutdown(config)` | Graceful shutdown with custom configuration |
+| `RunWithConfig(config)` | Custom config without graceful shutdown |
+
+&nbsp;
+
+**Custom shutdown timeout:**
+
+```go
+config := rig.DefaultServerConfig()
+config.Addr = ":8080"
+config.ShutdownTimeout = 30 * time.Second  // Wait longer for in-flight requests
+
+if err := r.RunWithGracefulShutdown(config); err != nil {
+    log.Fatal(err)
+}
+```
 
 &nbsp;
 

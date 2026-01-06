@@ -1,7 +1,14 @@
 package rig
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -38,6 +45,13 @@ type ServerConfig struct {
 	// read parsing the request header's keys and values.
 	// Default: 1MB (1 << 20).
 	MaxHeaderBytes int
+
+	// ShutdownTimeout is the maximum duration to wait for active connections
+	// to finish during graceful shutdown. After this timeout, the server
+	// forcefully closes remaining connections.
+	// Only used by RunGracefully and RunWithGracefulShutdown.
+	// Default: 5 seconds.
+	ShutdownTimeout time.Duration
 }
 
 // DefaultServerConfig returns production-safe default timeouts.
@@ -50,6 +64,7 @@ type ServerConfig struct {
 //   - IdleTimeout: 120s - allows keep-alive but not indefinitely
 //   - ReadHeaderTimeout: 2s - critical Slowloris protection
 //   - MaxHeaderBytes: 1MB - prevents header size attacks
+//   - ShutdownTimeout: 5s - time for graceful shutdown
 func DefaultServerConfig() ServerConfig {
 	return ServerConfig{
 		ReadTimeout:       5 * time.Second,
@@ -57,6 +72,7 @@ func DefaultServerConfig() ServerConfig {
 		IdleTimeout:       120 * time.Second,
 		ReadHeaderTimeout: 2 * time.Second,
 		MaxHeaderBytes:    1 << 20, // 1MB
+		ShutdownTimeout:   5 * time.Second,
 	}
 }
 
@@ -268,6 +284,99 @@ func (r *Router) RunWithConfig(config ServerConfig) error {
 // Use Run() or RunWithConfig() instead.
 func (r *Router) RunUnsafe(addr string) error {
 	return http.ListenAndServe(addr, r)
+}
+
+// RunGracefully starts the HTTP server with production-safe defaults and
+// waits for a termination signal (SIGINT or SIGTERM) to shut down gracefully.
+//
+// It ensures that active connections are given time to complete before the
+// process exits. This is the recommended method for production deployments,
+// especially in containerized environments (Docker, Kubernetes).
+//
+// The server will:
+//  1. Listen for SIGINT (Ctrl+C) and SIGTERM (Docker stop, Kubernetes terminate)
+//  2. Stop accepting new connections when a signal is received
+//  3. Wait up to 5 seconds for active requests to complete
+//  4. Forcefully close remaining connections after the timeout
+//
+// Example:
+//
+//	func main() {
+//	    r := rig.New()
+//	    r.GET("/", handler)
+//	    if err := r.RunGracefully(":8080"); err != nil {
+//	        log.Fatal(err)
+//	    }
+//	}
+func (r *Router) RunGracefully(addr string) error {
+	config := DefaultServerConfig()
+	config.Addr = addr
+	return r.RunWithGracefulShutdown(config)
+}
+
+// RunWithGracefulShutdown starts the server with specific configuration and
+// handles graceful shutdown automatically. Use this when you need custom
+// timeouts or shutdown behavior.
+//
+// Example:
+//
+//	config := rig.DefaultServerConfig()
+//	config.Addr = ":8080"
+//	config.WriteTimeout = 30 * time.Second  // Allow longer responses
+//	config.ShutdownTimeout = 10 * time.Second  // More time for shutdown
+//	r.RunWithGracefulShutdown(config)
+func (r *Router) RunWithGracefulShutdown(config ServerConfig) error {
+	server := &http.Server{
+		Addr:              config.Addr,
+		Handler:           r,
+		ReadTimeout:       config.ReadTimeout,
+		WriteTimeout:      config.WriteTimeout,
+		IdleTimeout:       config.IdleTimeout,
+		ReadHeaderTimeout: config.ReadHeaderTimeout,
+		MaxHeaderBytes:    config.MaxHeaderBytes,
+	}
+
+	// Channel to listen for errors from the server
+	serverErrors := make(chan error, 1)
+
+	// Start the server in a goroutine so it doesn't block
+	go func() {
+		log.Printf("Rig server listening on %s", config.Addr)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErrors <- err
+		}
+	}()
+
+	// Channel to listen for interrupt signals
+	quit := make(chan os.Signal, 1)
+	// SIGINT (Ctrl+C) and SIGTERM (Docker stop, Kubernetes terminate)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	// Block until we receive a signal or the server errors out
+	select {
+	case err := <-serverErrors:
+		return fmt.Errorf("server error: %w", err)
+	case sig := <-quit:
+		log.Printf("Shutdown signal received: %v", sig)
+	}
+
+	// Use configured shutdown timeout, default to 5s if not set
+	shutdownTimeout := config.ShutdownTimeout
+	if shutdownTimeout == 0 {
+		shutdownTimeout = 5 * time.Second
+	}
+
+	// Create a deadline for the shutdown
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+
+	log.Println("Shutting down server...")
+	if err := server.Shutdown(ctx); err != nil {
+		return fmt.Errorf("server forced to shutdown: %w", err)
+	}
+
+	log.Println("Server exited gracefully")
+	return nil
 }
 
 // Group creates a new route group with the given prefix.
