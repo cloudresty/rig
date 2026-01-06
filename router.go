@@ -2,7 +2,63 @@ package rig
 
 import (
 	"net/http"
+	"time"
 )
+
+// ServerConfig holds the configuration for the HTTP server.
+// Use DefaultServerConfig() to get production-safe defaults that protect
+// against Slowloris attacks and connection leaks.
+type ServerConfig struct {
+	// Addr is the TCP address to listen on (e.g., ":8080" or "127.0.0.1:8080").
+	Addr string
+
+	// ReadTimeout is the maximum duration for reading the entire request,
+	// including the body. This prevents clients from holding connections
+	// open indefinitely by sending data slowly.
+	// Default: 5 seconds.
+	ReadTimeout time.Duration
+
+	// WriteTimeout is the maximum duration before timing out writes of the
+	// response. This prevents slow clients from consuming server resources.
+	// Default: 10 seconds.
+	WriteTimeout time.Duration
+
+	// IdleTimeout is the maximum amount of time to wait for the next request
+	// when keep-alives are enabled. If zero, the value of ReadTimeout is used.
+	// Default: 120 seconds.
+	IdleTimeout time.Duration
+
+	// ReadHeaderTimeout is the amount of time allowed to read request headers.
+	// This is a critical defense against Slowloris attacks where attackers
+	// send headers very slowly to exhaust server resources.
+	// Default: 2 seconds.
+	ReadHeaderTimeout time.Duration
+
+	// MaxHeaderBytes controls the maximum number of bytes the server will
+	// read parsing the request header's keys and values.
+	// Default: 1MB (1 << 20).
+	MaxHeaderBytes int
+}
+
+// DefaultServerConfig returns production-safe default timeouts.
+// These settings protect against Slowloris attacks and ensure connections
+// aren't held open indefinitely.
+//
+// The defaults are:
+//   - ReadTimeout: 5s - prevents slow request body attacks
+//   - WriteTimeout: 10s - prevents slow response consumption
+//   - IdleTimeout: 120s - allows keep-alive but not indefinitely
+//   - ReadHeaderTimeout: 2s - critical Slowloris protection
+//   - MaxHeaderBytes: 1MB - prevents header size attacks
+func DefaultServerConfig() ServerConfig {
+	return ServerConfig{
+		ReadTimeout:       5 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		ReadHeaderTimeout: 2 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1MB
+	}
+}
 
 // Router wraps http.ServeMux to provide a convenient API for routing
 // HTTP requests with the custom HandlerFunc signature.
@@ -166,9 +222,51 @@ func (r *Router) Handler() http.Handler {
 	return r.mux
 }
 
-// Run starts the HTTP server on the given address.
-// This is a convenience method that wraps http.ListenAndServe.
+// Run starts the HTTP server on the given address with production-safe
+// default timeouts. This protects against Slowloris attacks and connection leaks.
+//
+// For custom timeouts (e.g., long-polling endpoints), use RunWithConfig instead.
+//
+// Default timeouts applied:
+//   - ReadTimeout: 5s
+//   - WriteTimeout: 10s
+//   - IdleTimeout: 120s
+//   - ReadHeaderTimeout: 2s
+//   - MaxHeaderBytes: 1MB
 func (r *Router) Run(addr string) error {
+	config := DefaultServerConfig()
+	config.Addr = addr
+	return r.RunWithConfig(config)
+}
+
+// RunWithConfig starts the HTTP server with specific configuration.
+// This is the recommended method for production deployments where you need
+// custom timeouts (e.g., long-polling, file uploads, streaming responses).
+//
+// Example:
+//
+//	config := rig.DefaultServerConfig()
+//	config.Addr = ":8080"
+//	config.WriteTimeout = 30 * time.Second // Allow longer responses
+//	r.RunWithConfig(config)
+func (r *Router) RunWithConfig(config ServerConfig) error {
+	server := &http.Server{
+		Addr:              config.Addr,
+		Handler:           r,
+		ReadTimeout:       config.ReadTimeout,
+		WriteTimeout:      config.WriteTimeout,
+		IdleTimeout:       config.IdleTimeout,
+		ReadHeaderTimeout: config.ReadHeaderTimeout,
+		MaxHeaderBytes:    config.MaxHeaderBytes,
+	}
+	return server.ListenAndServe()
+}
+
+// RunUnsafe starts the HTTP server without any timeouts.
+// WARNING: This is only for development or testing. In production, this
+// makes your server vulnerable to Slowloris attacks and connection leaks.
+// Use Run() or RunWithConfig() instead.
+func (r *Router) RunUnsafe(addr string) error {
 	return http.ListenAndServe(addr, r)
 }
 
