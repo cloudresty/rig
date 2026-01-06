@@ -34,6 +34,25 @@
 //
 //	{{template "_sidebar" .}}
 //
+// # Shared Directories (Component-Based Architecture)
+//
+// For larger applications, use SharedDirs to designate entire directories
+// as globally available partials. This enables component-based architecture:
+//
+//	engine := render.New(render.Config{
+//	    Directory: "./templates",
+//	    Layout:    "layouts/base",
+//	    SharedDirs: []string{"components", "layouts", "base"},
+//	})
+//
+// Templates in shared directories can be included from any feature template:
+//
+//	{{template "components/button" .}}
+//	{{template "base/modal" .}}
+//
+// This allows feature pages (e.g., features/dashboard/index) to remain isolated
+// while sharing common components without naming conflicts.
+//
 // # Content Negotiation
 //
 //	// Returns HTML or JSON based on Accept header
@@ -93,6 +112,23 @@ type Config struct {
 	// Default: []string{".html", ".tmpl"}.
 	Extensions []string
 
+	// SharedDirs is a list of directories (relative to Directory) containing
+	// templates that should be available globally to all other templates.
+	//
+	// Templates in these directories are treated as partials, meaning they
+	// are loaded into the shared namespace and can be included from any template.
+	// This enables component-based architecture without requiring underscore prefixes.
+	//
+	// Example:
+	//   SharedDirs: []string{"components", "layouts", "base"}
+	//
+	// With this config, templates in "components/button.html" can be included
+	// from any feature template using {{template "components/button" .}}
+	//
+	// This works alongside the underscore convention - files starting with "_"
+	// are still treated as partials regardless of their directory.
+	SharedDirs []string
+
 	// Layout is the name of the base layout template (without extension).
 	// If set, all templates will be rendered within this layout.
 	// The layout should contain {{.Content}} to include page content.
@@ -116,6 +152,11 @@ type Config struct {
 	// Example: []string{"[[", "]]"} changes Go templates to use [[ .Title ]]
 	// Default: []string{"{{", "}}"} (standard Go template delimiters).
 	Delims []string
+
+	// Minify removes unnecessary whitespace from HTML output.
+	// This can reduce bandwidth and improve page load times in production.
+	// Default: false.
+	Minify bool
 }
 
 // Engine is the template rendering engine.
@@ -241,9 +282,10 @@ func (e *Engine) Load() error {
 
 		tf := templateFile{name: name, path: path, content: string(content)}
 
-		// Check if this is a partial (filename starts with _)
-		baseName := filepath.Base(name)
-		if strings.HasPrefix(baseName, "_") {
+		// Check if this is a shared partial:
+		// - filename starts with "_" (legacy convention), OR
+		// - file resides in a SharedDirs directory
+		if e.isShared(path) {
 			partialFiles = append(partialFiles, tf)
 		} else {
 			files = append(files, tf)
@@ -309,6 +351,40 @@ func (e *Engine) Load() error {
 // isValidExtension checks if the given extension is in the allowed list.
 func (e *Engine) isValidExtension(ext string) bool {
 	return slices.Contains(e.config.Extensions, ext)
+}
+
+// isShared checks if a template file should be treated as a shared partial.
+// It returns true if:
+//  1. The filename starts with underscore (legacy convention), OR
+//  2. The file resides inside one of the configured SharedDirs
+func (e *Engine) isShared(path string) bool {
+	// Rule 1: Filename starts with underscore (legacy convention)
+	baseName := filepath.Base(path)
+	if strings.HasPrefix(baseName, "_") {
+		return true
+	}
+
+	// Rule 2: File resides in a Shared Directory
+	if len(e.config.SharedDirs) == 0 {
+		return false
+	}
+
+	// Normalize path separators to forward slashes for comparison
+	normalizedPath := filepath.ToSlash(path)
+
+	for _, dir := range e.config.SharedDirs {
+		// Normalize dir and ensure no trailing slash
+		cleanDir := strings.TrimSuffix(filepath.ToSlash(dir), "/")
+
+		// Check if path starts with dir/
+		// We add a trailing slash to ensure we match directory boundaries
+		// e.g., "components" matches "components/button.html" but not "components-extra/file.html"
+		if strings.HasPrefix(normalizedPath, cleanDir+"/") {
+			return true
+		}
+	}
+
+	return false
 }
 
 // applyDelims applies custom delimiters to a template if configured.
@@ -400,7 +476,11 @@ func (e *Engine) Render(name string, data any) (string, error) {
 		}
 	}
 
-	return buf.String(), nil
+	result := buf.String()
+	if e.config.Minify {
+		result = minifyHTML(result)
+	}
+	return result, nil
 }
 
 // HTML renders a template and writes it as an HTML response.
@@ -500,6 +580,12 @@ func Auto(c *rig.Context, status int, templateName string, data any) error {
 		return JSON(c, status, data)
 	}
 
+	// Check for HTML preference (browsers send text/html first in Accept header)
+	// This must come before XML check because browsers also include application/xml
+	if templateName != "" && (strings.Contains(accept, "text/html") || strings.Contains(accept, "*/*")) {
+		return HTML(c, status, templateName, data)
+	}
+
 	// Check for XML preference
 	if strings.Contains(accept, "application/xml") || strings.Contains(accept, "text/xml") {
 		return XML(c, status, data)
@@ -521,6 +607,12 @@ func AutoDirect(c *rig.Context, engine *Engine, status int, templateName string,
 	// Check for JSON preference
 	if strings.Contains(accept, "application/json") {
 		return JSON(c, status, data)
+	}
+
+	// Check for HTML preference (browsers send text/html first in Accept header)
+	// This must come before XML check because browsers also include application/xml
+	if templateName != "" && (strings.Contains(accept, "text/html") || strings.Contains(accept, "*/*")) {
+		return HTMLDirect(c, engine, status, templateName, data)
 	}
 
 	// Check for XML preference

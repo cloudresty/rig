@@ -3,6 +3,7 @@
 // Features demonstrated:
 //   - Layouts with {{.Content}} and {{.Data}} access
 //   - Partials (templates starting with _)
+//   - SharedDirs for component-based architecture
 //   - Content negotiation (HTML/JSON/XML based on Accept header)
 //   - Custom template functions
 //   - DevMode hot reloading
@@ -47,11 +48,30 @@ func main() {
 		Directory: "./templates",  // Template directory
 		Layout:    "layouts/base", // Base layout for all pages
 		DevMode:   true,           // Hot reload templates on each request
+
+		// SharedDirs enables component-based architecture.
+		// Templates in these directories are available globally to all other templates.
+		// This allows pages to include components like {{template "components/card" .}}
+		// Note: Don't include "layouts" here since it's used as the Layout template.
+		SharedDirs: []string{"components"},
 	})
 
 	// Add custom template functions (optional)
 	engine.AddFunc("formatDate", func(t time.Time) string {
 		return t.Format("Monday, January 2, 2006 at 3:04 PM")
+	})
+
+	// Add a "map" helper for passing multiple values to components
+	// Usage: {{template "components/card" (map "Title" "Hello" "Content" "World")}}
+	engine.AddFunc("map", func(pairs ...any) map[string]any {
+		m := make(map[string]any)
+		for i := 0; i < len(pairs)-1; i += 2 {
+			key, ok := pairs[i].(string)
+			if ok {
+				m[key] = pairs[i+1]
+			}
+		}
+		return m
 	})
 
 	// Create the rig router

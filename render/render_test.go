@@ -108,6 +108,219 @@ func TestEngine_Load_LayoutNotFound(t *testing.T) {
 	}
 }
 
+// --- SharedDirs Tests ---
+
+func TestEngine_Load_WithSharedDirs(t *testing.T) {
+	engine := New(Config{
+		Directory:  "./testdata/templates_shareddirs",
+		SharedDirs: []string{"components", "base"},
+	})
+
+	if err := engine.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// Check that feature templates were loaded as regular templates
+	expectedTemplates := []string{"features/dashboard/index", "features/users/list"}
+	for _, name := range expectedTemplates {
+		if _, ok := engine.templates[name]; !ok {
+			t.Errorf("Template %q not loaded as regular template", name)
+		}
+	}
+
+	// Check that shared dirs templates were loaded as partials
+	expectedPartials := []string{"components/button", "components/card", "base/modal"}
+	partialNames := engine.PartialNames()
+	for _, name := range expectedPartials {
+		if !slices.Contains(partialNames, name) {
+			t.Errorf("Partial %q not loaded from SharedDirs", name)
+		}
+	}
+}
+
+func TestEngine_Load_SharedDirs_DirectoryBoundary(t *testing.T) {
+	// Test that SharedDirs correctly matches directory boundaries
+	// e.g., "components" should match "components/button" but not "components-extra/file"
+	engine := New(Config{
+		Directory:  "./testdata/templates_shareddirs",
+		SharedDirs: []string{"components"},
+	})
+
+	if err := engine.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// components/* should be partials
+	partialNames := engine.PartialNames()
+	if !slices.Contains(partialNames, "components/button") {
+		t.Error("components/button should be a partial")
+	}
+	if !slices.Contains(partialNames, "components/card") {
+		t.Error("components/card should be a partial")
+	}
+
+	// base/* should NOT be partials (not in SharedDirs)
+	if slices.Contains(partialNames, "base/modal") {
+		t.Error("base/modal should NOT be a partial (not in SharedDirs)")
+	}
+}
+
+func TestEngine_Render_WithSharedDirs(t *testing.T) {
+	engine := New(Config{
+		Directory:  "./testdata/templates_shareddirs",
+		SharedDirs: []string{"components", "base"},
+	})
+
+	if err := engine.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// Render dashboard which uses components
+	result, err := engine.Render("features/dashboard/index", nil)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	// Check that components were included
+	if !strings.Contains(result, "<h1>Dashboard</h1>") {
+		t.Error("Result should contain Dashboard heading")
+	}
+	if !strings.Contains(result, `<button class="btn">Click Me</button>`) {
+		t.Errorf("Result should contain button component, got: %s", result)
+	}
+	if !strings.Contains(result, `<div class="card">Stats Card</div>`) {
+		t.Errorf("Result should contain card component, got: %s", result)
+	}
+}
+
+func TestEngine_Render_SharedDirs_CrossFeature(t *testing.T) {
+	engine := New(Config{
+		Directory:  "./testdata/templates_shareddirs",
+		SharedDirs: []string{"components", "base"},
+	})
+
+	if err := engine.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// Render users list which uses components AND base
+	result, err := engine.Render("features/users/list", nil)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	// Check that both components and base partials were included
+	if !strings.Contains(result, `<div class="card">User Card</div>`) {
+		t.Errorf("Result should contain card component, got: %s", result)
+	}
+	if !strings.Contains(result, `<div class="modal">User Details</div>`) {
+		t.Errorf("Result should contain modal from base, got: %s", result)
+	}
+}
+
+func TestEngine_isShared(t *testing.T) {
+	tests := []struct {
+		name       string
+		path       string
+		sharedDirs []string
+		want       bool
+	}{
+		{
+			name:       "underscore prefix is always shared",
+			path:       "_partial.html",
+			sharedDirs: nil,
+			want:       true,
+		},
+		{
+			name:       "underscore in subdirectory",
+			path:       "pages/_sidebar.html",
+			sharedDirs: nil,
+			want:       true,
+		},
+		{
+			name:       "file in shared dir",
+			path:       "components/button.html",
+			sharedDirs: []string{"components"},
+			want:       true,
+		},
+		{
+			name:       "file in nested shared dir",
+			path:       "components/forms/input.html",
+			sharedDirs: []string{"components"},
+			want:       true,
+		},
+		{
+			name:       "file not in shared dir",
+			path:       "features/home.html",
+			sharedDirs: []string{"components"},
+			want:       false,
+		},
+		{
+			name:       "directory boundary check - similar prefix",
+			path:       "components-extra/widget.html",
+			sharedDirs: []string{"components"},
+			want:       false,
+		},
+		{
+			name:       "multiple shared dirs - first match",
+			path:       "base/modal.html",
+			sharedDirs: []string{"components", "base", "layouts"},
+			want:       true,
+		},
+		{
+			name:       "multiple shared dirs - second match",
+			path:       "layouts/main.html",
+			sharedDirs: []string{"components", "base", "layouts"},
+			want:       true,
+		},
+		{
+			name:       "empty shared dirs",
+			path:       "components/button.html",
+			sharedDirs: nil,
+			want:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := New(Config{
+				SharedDirs: tt.sharedDirs,
+			})
+
+			if got := engine.isShared(tt.path); got != tt.want {
+				t.Errorf("isShared(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEngine_SharedDirs_WithUnderscoreConvention(t *testing.T) {
+	// Test that underscore convention still works alongside SharedDirs
+	engine := New(Config{
+		Directory:  "./testdata/templates",
+		SharedDirs: []string{"layouts"}, // layouts is also a SharedDir
+	})
+
+	if err := engine.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	partialNames := engine.PartialNames()
+
+	// Underscore files should still be partials
+	if !slices.Contains(partialNames, "_footer") {
+		t.Error("_footer should be a partial (underscore convention)")
+	}
+	if !slices.Contains(partialNames, "_sidebar") {
+		t.Error("_sidebar should be a partial (underscore convention)")
+	}
+
+	// layouts/base should also be a partial (SharedDirs)
+	if !slices.Contains(partialNames, "layouts/base") {
+		t.Error("layouts/base should be a partial (SharedDirs)")
+	}
+}
+
 func TestEngine_Render_Simple(t *testing.T) {
 	engine := New(Config{
 		Directory: "./testdata/templates",
@@ -1142,5 +1355,280 @@ func TestHTMLSafe_FallbackToErrorPage(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "Code: 500") {
 		t.Errorf("Expected status code in error page, got: %s", w.Body.String())
+	}
+}
+
+func TestEngine_Minify(t *testing.T) {
+	fs := fstest.MapFS{
+		"page.html": &fstest.MapFile{
+			Data: []byte(`<!DOCTYPE html>
+<html>
+    <head>
+        <title>Test</title>
+    </head>
+    <body>
+        <h1>Hello</h1>
+        <p>World</p>
+    </body>
+</html>`),
+		},
+	}
+
+	engine := New(Config{
+		FileSystem: fs,
+		Directory:  ".",
+		Minify:     true,
+	})
+
+	if err := engine.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	result, err := engine.Render("page", nil)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	// Check that multiple whitespace is collapsed
+	if strings.Contains(result, "    ") {
+		t.Errorf("Result contains multiple spaces, minification failed")
+	}
+
+	// Check that newlines between tags are removed
+	if strings.Contains(result, ">\n<") {
+		t.Errorf("Result contains newlines between tags, minification failed")
+	}
+
+	// Check that content is preserved
+	if !strings.Contains(result, "<h1>Hello</h1>") {
+		t.Errorf("Result should contain <h1>Hello</h1>, got: %s", result)
+	}
+	if !strings.Contains(result, "<p>World</p>") {
+		t.Errorf("Result should contain <p>World</p>, got: %s", result)
+	}
+}
+
+func TestMinifyHTML_PreservesScriptContent(t *testing.T) {
+	input := `<html>
+<body>
+<script>
+// JavaScript comment
+function test() {
+    return true;
+}
+</script>
+</body>
+</html>`
+
+	result := minifyHTML(input)
+
+	// Script content should be fully preserved including JS comments
+	if !strings.Contains(result, "// JavaScript comment") {
+		t.Errorf("JS comment should be preserved, got: %s", result)
+	}
+	if !strings.Contains(result, "function test()") {
+		t.Errorf("Function should be preserved, got: %s", result)
+	}
+}
+
+func TestMinifyHTML_PreservesPreContent(t *testing.T) {
+	input := `<html>
+<body>
+<pre>
+    indented code
+        more indent
+</pre>
+</body>
+</html>`
+
+	result := minifyHTML(input)
+
+	// Pre content should preserve whitespace exactly
+	if !strings.Contains(result, "    indented code\n        more indent") {
+		t.Errorf("Pre whitespace should be preserved, got: %s", result)
+	}
+}
+
+func TestMinifyHTML_PreservesStyleContent(t *testing.T) {
+	input := `<html>
+<head>
+<style>
+.class {
+    color: red;
+}
+</style>
+</head>
+</html>`
+
+	result := minifyHTML(input)
+
+	// Style content should be preserved
+	if !strings.Contains(result, ".class {") {
+		t.Errorf("Style content should be preserved, got: %s", result)
+	}
+	if !strings.Contains(result, "color: red;") {
+		t.Errorf("Style rules should be preserved, got: %s", result)
+	}
+}
+
+func TestMinifyHTML_PreservesTextareaContent(t *testing.T) {
+	input := `<html>
+<body>
+<textarea>
+User input
+    with indent
+</textarea>
+</body>
+</html>`
+
+	result := minifyHTML(input)
+
+	// Textarea content should preserve whitespace
+	if !strings.Contains(result, "User input\n    with indent") {
+		t.Errorf("Textarea whitespace should be preserved, got: %s", result)
+	}
+}
+
+func TestMinifyHTML_CollapsesWhitespaceOutsideProtectedBlocks(t *testing.T) {
+	input := `<html>
+    <body>
+        <div>
+            Content
+        </div>
+    </body>
+</html>`
+
+	result := minifyHTML(input)
+
+	// Whitespace between tags should be removed
+	if strings.Contains(result, ">\n<") {
+		t.Errorf("Newlines between tags should be removed, got: %s", result)
+	}
+	// Multiple spaces should be collapsed
+	if strings.Contains(result, "    ") {
+		t.Errorf("Multiple spaces should be collapsed, got: %s", result)
+	}
+	// Content should be preserved
+	if !strings.Contains(result, "Content") {
+		t.Errorf("Content should be preserved, got: %s", result)
+	}
+}
+
+func TestMinifyHTML_PreservesInlineElementSpaces(t *testing.T) {
+	// Critical test: spaces between inline elements must be preserved
+	// to prevent "Hello World" from becoming "HelloWorld"
+	input := `<p><b>Hello</b> <span>World</span></p>`
+
+	result := minifyHTML(input)
+
+	// The space between </b> and <span> MUST be preserved
+	if !strings.Contains(result, "</b> <span>") {
+		t.Errorf("Space between inline elements should be preserved, got: %s", result)
+	}
+}
+
+func TestMinifyHTML_RemovesSpacesBetweenBlockElements(t *testing.T) {
+	input := `<div>First</div>    <div>Second</div>`
+
+	result := minifyHTML(input)
+
+	// Space between block elements should be removed
+	if strings.Contains(result, "</div> <div>") {
+		t.Errorf("Space between block elements should be removed, got: %s", result)
+	}
+	if !strings.Contains(result, "</div><div>") {
+		t.Errorf("Block elements should be adjacent, got: %s", result)
+	}
+}
+
+func TestMinifyHTML_PreservesIEConditionalComments(t *testing.T) {
+	input := `<html>
+<!--[if IE 9]>
+<link href="ie9.css" rel="stylesheet">
+<![endif]-->
+<!-- This regular comment should be removed -->
+<body>Content</body>
+</html>`
+
+	result := minifyHTML(input)
+
+	// IE conditional comment should be preserved
+	if !strings.Contains(result, "<!--[if IE 9]>") {
+		t.Errorf("IE conditional comment should be preserved, got: %s", result)
+	}
+	if !strings.Contains(result, "<![endif]-->") {
+		t.Errorf("IE conditional end should be preserved, got: %s", result)
+	}
+
+	// Regular HTML comment should be removed
+	if strings.Contains(result, "This regular comment") {
+		t.Errorf("Regular HTML comments should be removed, got: %s", result)
+	}
+}
+
+func TestEngine_Minify_RemovesHTMLComments(t *testing.T) {
+	fs := fstest.MapFS{
+		"page.html": &fstest.MapFile{
+			Data: []byte(`<html>
+<!-- This comment should be removed -->
+<body>
+    <p>Content</p>
+    <!-- Another comment -->
+</body>
+</html>`),
+		},
+	}
+
+	engine := New(Config{
+		FileSystem: fs,
+		Directory:  ".",
+		Minify:     true,
+	})
+
+	if err := engine.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	result, err := engine.Render("page", nil)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	// HTML comments should be removed
+	if strings.Contains(result, "<!--") {
+		t.Errorf("HTML comments should be removed, got: %s", result)
+	}
+
+	// Content should be preserved
+	if !strings.Contains(result, "<p>Content</p>") {
+		t.Errorf("Content should be preserved, got: %s", result)
+	}
+}
+
+func TestEngine_Minify_Disabled(t *testing.T) {
+	fs := fstest.MapFS{
+		"page.html": &fstest.MapFile{
+			Data: []byte("<html>\n    <body>\n        <h1>Hello</h1>\n    </body>\n</html>"),
+		},
+	}
+
+	engine := New(Config{
+		FileSystem: fs,
+		Directory:  ".",
+		Minify:     false, // Disabled
+	})
+
+	if err := engine.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	result, err := engine.Render("page", nil)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	// Whitespace should be preserved when minify is disabled
+	if !strings.Contains(result, "\n") {
+		t.Errorf("Result should contain newlines when minify is disabled, got: %s", result)
 	}
 }

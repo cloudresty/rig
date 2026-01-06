@@ -89,6 +89,17 @@ func DefaultServerConfig() ServerConfig {
 	}
 }
 
+// StaticConfig holds configuration options for serving static files.
+type StaticConfig struct {
+	// CacheControl sets the Cache-Control header for static files.
+	// Common values:
+	//   - "public, max-age=31536000" (1 year, for versioned assets)
+	//   - "public, max-age=86400" (1 day)
+	//   - "no-cache" (always revalidate)
+	// If empty, no Cache-Control header is set.
+	CacheControl string
+}
+
 // Router wraps http.ServeMux to provide a convenient API for routing
 // HTTP requests with the custom HandlerFunc signature.
 type Router struct {
@@ -213,12 +224,19 @@ func (r *Router) HEAD(path string, handler HandlerFunc) {
 // Static registers a route to serve static files from a directory.
 // path is the URL path prefix (e.g., "/assets").
 // root is the local file system directory (e.g., "./public").
+// config is an optional StaticConfig for setting cache headers.
 //
 // Example:
 //
 //	r.Static("/assets", "./public")
 //	// GET /assets/css/style.css -> serves ./public/css/style.css
-func (r *Router) Static(path, root string) {
+//
+// With cache control (recommended for production):
+//
+//	r.Static("/assets", "./public", rig.StaticConfig{
+//	    CacheControl: "public, max-age=31536000", // 1 year
+//	})
+func (r *Router) Static(path, root string, config ...StaticConfig) {
 	validatePath(path)
 
 	// Ensure path ends with slash for correct StripPrefix behavior
@@ -226,11 +244,21 @@ func (r *Router) Static(path, root string) {
 		path += "/"
 	}
 
+	// Extract config if provided
+	var cfg StaticConfig
+	if len(config) > 0 {
+		cfg = config[0]
+	}
+
 	// Create the file server handler
 	fs := http.StripPrefix(path, http.FileServer(http.Dir(root)))
 
-	// Wrap it in a Rig handler to support middleware
+	// Wrap it in a Rig handler to support middleware and cache headers
 	handler := func(c *Context) error {
+		// Set Cache-Control header if configured
+		if cfg.CacheControl != "" {
+			c.SetHeader("Cache-Control", cfg.CacheControl)
+		}
 		fs.ServeHTTP(c.Writer(), c.Request())
 		return nil
 	}

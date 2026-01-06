@@ -1,0 +1,10 @@
+{{/*
+    Card Component - A reusable card container
+    Usage: {{template "components/card" (dict "Title" "My Title" "Content" "My content")}}
+    Or with simpler data: {{template "components/card" .}}
+    Expected fields: .Title, .Content (optional), or just renders . as content
+*/}}
+<div class="card">
+    {{if .Title}}<h3>{{.Title}}</h3>{{end}}
+    {{if .Content}}{{.Content}}{{else}}{{.}}{{end}}
+</div>

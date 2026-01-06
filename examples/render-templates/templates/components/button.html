@@ -1,0 +1,10 @@
+{{/*
+    Button Component - A reusable button/link
+    Usage: {{template "components/button" (dict "Text" "Click Me" "Href" "/path")}}
+    Or simple: {{template "components/button" "Click Me"}}
+*/}}
+{{if eq (printf "%T" .) "string"}}
+<a href="#" class="btn">{{.}}</a>
+{{else}}
+<a href="{{if .Href}}{{.Href}}{{else}}#{{end}}" class="btn{{if .Class}} {{.Class}}{{end}}">{{.Text}}</a>
+{{end}}

@@ -1038,6 +1038,79 @@ func TestRouter_Static_PathValidation(t *testing.T) {
 	r.Static("assets", ".") // missing leading slash
 }
 
+func TestRouter_Static_WithCacheControl(t *testing.T) {
+	// Create a temporary directory with a test file
+	tmpDir, err := os.MkdirTemp("", "rig-static-cache-test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	// Create a test file
+	testContent := "body { color: blue; }"
+	testFile := tmpDir + "/style.css"
+	if err := os.WriteFile(testFile, []byte(testContent), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	r := New()
+	r.Static("/assets", tmpDir, StaticConfig{
+		CacheControl: "public, max-age=31536000",
+	})
+
+	// Test serving the file with cache header
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/assets/style.css", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	cacheControl := w.Header().Get("Cache-Control")
+	if cacheControl != "public, max-age=31536000" {
+		t.Errorf("Cache-Control = %q, want %q", cacheControl, "public, max-age=31536000")
+	}
+
+	if !strings.Contains(w.Body.String(), testContent) {
+		t.Errorf("body = %q, should contain %q", w.Body.String(), testContent)
+	}
+}
+
+func TestRouter_Static_WithoutCacheControl(t *testing.T) {
+	// Create a temporary directory with a test file
+	tmpDir, err := os.MkdirTemp("", "rig-static-nocache-test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	// Create a test file
+	testContent := "console.log('test');"
+	testFile := tmpDir + "/app.js"
+	if err := os.WriteFile(testFile, []byte(testContent), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	r := New()
+	// No config provided - should not set Cache-Control
+	r.Static("/js", tmpDir)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/js/app.js", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	// Cache-Control should not be set when no config provided
+	cacheControl := w.Header().Get("Cache-Control")
+	if cacheControl != "" {
+		t.Errorf("Cache-Control = %q, want empty (no config provided)", cacheControl)
+	}
+}
+
 // --- Server Config Tests ---
 
 func TestDefaultServerConfig(t *testing.T) {
