@@ -1357,3 +1357,278 @@ func TestHTMLSafe_FallbackToErrorPage(t *testing.T) {
 		t.Errorf("Expected status code in error page, got: %s", w.Body.String())
 	}
 }
+
+func TestEngine_Minify(t *testing.T) {
+	fs := fstest.MapFS{
+		"page.html": &fstest.MapFile{
+			Data: []byte(`<!DOCTYPE html>
+<html>
+    <head>
+        <title>Test</title>
+    </head>
+    <body>
+        <h1>Hello</h1>
+        <p>World</p>
+    </body>
+</html>`),
+		},
+	}
+
+	engine := New(Config{
+		FileSystem: fs,
+		Directory:  ".",
+		Minify:     true,
+	})
+
+	if err := engine.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	result, err := engine.Render("page", nil)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	// Check that multiple whitespace is collapsed
+	if strings.Contains(result, "    ") {
+		t.Errorf("Result contains multiple spaces, minification failed")
+	}
+
+	// Check that newlines between tags are removed
+	if strings.Contains(result, ">\n<") {
+		t.Errorf("Result contains newlines between tags, minification failed")
+	}
+
+	// Check that content is preserved
+	if !strings.Contains(result, "<h1>Hello</h1>") {
+		t.Errorf("Result should contain <h1>Hello</h1>, got: %s", result)
+	}
+	if !strings.Contains(result, "<p>World</p>") {
+		t.Errorf("Result should contain <p>World</p>, got: %s", result)
+	}
+}
+
+func TestMinifyHTML_PreservesScriptContent(t *testing.T) {
+	input := `<html>
+<body>
+<script>
+// JavaScript comment
+function test() {
+    return true;
+}
+</script>
+</body>
+</html>`
+
+	result := minifyHTML(input)
+
+	// Script content should be fully preserved including JS comments
+	if !strings.Contains(result, "// JavaScript comment") {
+		t.Errorf("JS comment should be preserved, got: %s", result)
+	}
+	if !strings.Contains(result, "function test()") {
+		t.Errorf("Function should be preserved, got: %s", result)
+	}
+}
+
+func TestMinifyHTML_PreservesPreContent(t *testing.T) {
+	input := `<html>
+<body>
+<pre>
+    indented code
+        more indent
+</pre>
+</body>
+</html>`
+
+	result := minifyHTML(input)
+
+	// Pre content should preserve whitespace exactly
+	if !strings.Contains(result, "    indented code\n        more indent") {
+		t.Errorf("Pre whitespace should be preserved, got: %s", result)
+	}
+}
+
+func TestMinifyHTML_PreservesStyleContent(t *testing.T) {
+	input := `<html>
+<head>
+<style>
+.class {
+    color: red;
+}
+</style>
+</head>
+</html>`
+
+	result := minifyHTML(input)
+
+	// Style content should be preserved
+	if !strings.Contains(result, ".class {") {
+		t.Errorf("Style content should be preserved, got: %s", result)
+	}
+	if !strings.Contains(result, "color: red;") {
+		t.Errorf("Style rules should be preserved, got: %s", result)
+	}
+}
+
+func TestMinifyHTML_PreservesTextareaContent(t *testing.T) {
+	input := `<html>
+<body>
+<textarea>
+User input
+    with indent
+</textarea>
+</body>
+</html>`
+
+	result := minifyHTML(input)
+
+	// Textarea content should preserve whitespace
+	if !strings.Contains(result, "User input\n    with indent") {
+		t.Errorf("Textarea whitespace should be preserved, got: %s", result)
+	}
+}
+
+func TestMinifyHTML_CollapsesWhitespaceOutsideProtectedBlocks(t *testing.T) {
+	input := `<html>
+    <body>
+        <div>
+            Content
+        </div>
+    </body>
+</html>`
+
+	result := minifyHTML(input)
+
+	// Whitespace between tags should be removed
+	if strings.Contains(result, ">\n<") {
+		t.Errorf("Newlines between tags should be removed, got: %s", result)
+	}
+	// Multiple spaces should be collapsed
+	if strings.Contains(result, "    ") {
+		t.Errorf("Multiple spaces should be collapsed, got: %s", result)
+	}
+	// Content should be preserved
+	if !strings.Contains(result, "Content") {
+		t.Errorf("Content should be preserved, got: %s", result)
+	}
+}
+
+func TestMinifyHTML_PreservesInlineElementSpaces(t *testing.T) {
+	// Critical test: spaces between inline elements must be preserved
+	// to prevent "Hello World" from becoming "HelloWorld"
+	input := `<p><b>Hello</b> <span>World</span></p>`
+
+	result := minifyHTML(input)
+
+	// The space between </b> and <span> MUST be preserved
+	if !strings.Contains(result, "</b> <span>") {
+		t.Errorf("Space between inline elements should be preserved, got: %s", result)
+	}
+}
+
+func TestMinifyHTML_RemovesSpacesBetweenBlockElements(t *testing.T) {
+	input := `<div>First</div>    <div>Second</div>`
+
+	result := minifyHTML(input)
+
+	// Space between block elements should be removed
+	if strings.Contains(result, "</div> <div>") {
+		t.Errorf("Space between block elements should be removed, got: %s", result)
+	}
+	if !strings.Contains(result, "</div><div>") {
+		t.Errorf("Block elements should be adjacent, got: %s", result)
+	}
+}
+
+func TestMinifyHTML_PreservesIEConditionalComments(t *testing.T) {
+	input := `<html>
+<!--[if IE 9]>
+<link href="ie9.css" rel="stylesheet">
+<![endif]-->
+<!-- This regular comment should be removed -->
+<body>Content</body>
+</html>`
+
+	result := minifyHTML(input)
+
+	// IE conditional comment should be preserved
+	if !strings.Contains(result, "<!--[if IE 9]>") {
+		t.Errorf("IE conditional comment should be preserved, got: %s", result)
+	}
+	if !strings.Contains(result, "<![endif]-->") {
+		t.Errorf("IE conditional end should be preserved, got: %s", result)
+	}
+
+	// Regular HTML comment should be removed
+	if strings.Contains(result, "This regular comment") {
+		t.Errorf("Regular HTML comments should be removed, got: %s", result)
+	}
+}
+
+func TestEngine_Minify_RemovesHTMLComments(t *testing.T) {
+	fs := fstest.MapFS{
+		"page.html": &fstest.MapFile{
+			Data: []byte(`<html>
+<!-- This comment should be removed -->
+<body>
+    <p>Content</p>
+    <!-- Another comment -->
+</body>
+</html>`),
+		},
+	}
+
+	engine := New(Config{
+		FileSystem: fs,
+		Directory:  ".",
+		Minify:     true,
+	})
+
+	if err := engine.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	result, err := engine.Render("page", nil)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	// HTML comments should be removed
+	if strings.Contains(result, "<!--") {
+		t.Errorf("HTML comments should be removed, got: %s", result)
+	}
+
+	// Content should be preserved
+	if !strings.Contains(result, "<p>Content</p>") {
+		t.Errorf("Content should be preserved, got: %s", result)
+	}
+}
+
+func TestEngine_Minify_Disabled(t *testing.T) {
+	fs := fstest.MapFS{
+		"page.html": &fstest.MapFile{
+			Data: []byte("<html>\n    <body>\n        <h1>Hello</h1>\n    </body>\n</html>"),
+		},
+	}
+
+	engine := New(Config{
+		FileSystem: fs,
+		Directory:  ".",
+		Minify:     false, // Disabled
+	})
+
+	if err := engine.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	result, err := engine.Render("page", nil)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	// Whitespace should be preserved when minify is disabled
+	if !strings.Contains(result, "\n") {
+		t.Errorf("Result should contain newlines when minify is disabled, got: %s", result)
+	}
+}

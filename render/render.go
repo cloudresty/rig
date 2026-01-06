@@ -152,6 +152,11 @@ type Config struct {
 	// Example: []string{"[[", "]]"} changes Go templates to use [[ .Title ]]
 	// Default: []string{"{{", "}}"} (standard Go template delimiters).
 	Delims []string
+
+	// Minify removes unnecessary whitespace from HTML output.
+	// This can reduce bandwidth and improve page load times in production.
+	// Default: false.
+	Minify bool
 }
 
 // Engine is the template rendering engine.
@@ -471,7 +476,11 @@ func (e *Engine) Render(name string, data any) (string, error) {
 		}
 	}
 
-	return buf.String(), nil
+	result := buf.String()
+	if e.config.Minify {
+		result = minifyHTML(result)
+	}
+	return result, nil
 }
 
 // HTML renders a template and writes it as an HTML response.

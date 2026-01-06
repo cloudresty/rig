@@ -271,6 +271,39 @@ r.Static("/assets", "./public")
 
 &nbsp;
 
+### Cache Control for Static Assets
+
+For production, enable cache headers to improve performance:
+
+```go
+// Cache for 1 year (recommended for versioned assets like app.v1.2.3.js)
+r.Static("/assets", "./public", rig.StaticConfig{
+    CacheControl: "public, max-age=31536000",
+})
+
+// Cache for 1 day (for assets that may change)
+r.Static("/images", "./images", rig.StaticConfig{
+    CacheControl: "public, max-age=86400",
+})
+
+// No caching (for development or dynamic assets)
+r.Static("/uploads", "./uploads", rig.StaticConfig{
+    CacheControl: "no-cache",
+})
+```
+
+&nbsp;
+
+| Cache-Control Value | Use Case |
+| :--- | :--- |
+| `public, max-age=31536000` | Versioned assets (CSS, JS with hash in filename) |
+| `public, max-age=86400` | Assets that may change daily |
+| `public, max-age=3600` | Assets that may change hourly |
+| `no-cache` | Always revalidate with server |
+| `no-store` | Never cache (sensitive data) |
+
+&nbsp;
+
 🔝 [back to top](#rig)
 
 &nbsp;
@@ -1127,6 +1160,35 @@ engine := render.New(render.Config{
     DevMode:   true, // Reloads templates on each request
 })
 ```
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
+### HTML Minification
+
+Enable HTML minification for production to reduce bandwidth and improve page load times:
+
+```go
+engine := render.New(render.Config{
+    Directory: "./templates",
+    Minify:    true, // Minify HTML output
+})
+```
+
+&nbsp;
+
+The minifier is enterprise-grade and safe:
+
+| Feature | Description |
+| :--- | :--- |
+| **Block element optimization** | Removes whitespace between block elements (`<div>`, `<p>`, `<section>`, etc.) |
+| **Inline element preservation** | Preserves spaces between inline elements (`<span>A</span> <span>B</span>` stays intact) |
+| **Protected blocks** | Preserves whitespace in `<pre>`, `<script>`, `<style>`, and `<textarea>` |
+| **Comment removal** | Removes HTML comments while preserving IE conditional comments |
+| **JavaScript safety** | Preserves `//` comments and formatting inside `<script>` tags |
 
 &nbsp;
 
