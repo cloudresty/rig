@@ -2,6 +2,7 @@ package rig
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1066,6 +1067,8 @@ func TestDefaultServerConfig(t *testing.T) {
 }
 
 func TestServerConfig_CustomValues(t *testing.T) {
+	customLogger := func(format string, args ...any) {}
+
 	config := ServerConfig{
 		Addr:              ":9090",
 		ReadTimeout:       15 * time.Second,
@@ -1074,6 +1077,7 @@ func TestServerConfig_CustomValues(t *testing.T) {
 		ReadHeaderTimeout: 5 * time.Second,
 		MaxHeaderBytes:    2 << 20,
 		ShutdownTimeout:   10 * time.Second,
+		Logger:            customLogger,
 	}
 
 	if config.Addr != ":9090" {
@@ -1088,6 +1092,42 @@ func TestServerConfig_CustomValues(t *testing.T) {
 	if config.ShutdownTimeout != 10*time.Second {
 		t.Errorf("ShutdownTimeout = %v, want %v", config.ShutdownTimeout, 10*time.Second)
 	}
+	if config.Logger == nil {
+		t.Error("Logger should not be nil")
+	}
+}
+
+func TestServerConfig_CustomLogger(t *testing.T) {
+	var logs []string
+	customLogger := func(format string, args ...any) {
+		logs = append(logs, fmt.Sprintf(format, args...))
+	}
+
+	config := DefaultServerConfig()
+	config.Logger = customLogger
+
+	// Simulate what RunWithGracefulShutdown does with the logger
+	logf := config.Logger
+	logf("Rig server listening on %s", ":8080")
+	logf("Shutdown signal received: %v", "interrupt")
+
+	if len(logs) != 2 {
+		t.Errorf("expected 2 log entries, got %d", len(logs))
+	}
+	if logs[0] != "Rig server listening on :8080" {
+		t.Errorf("unexpected log: %s", logs[0])
+	}
+}
+
+func TestServerConfig_SilentLogger(t *testing.T) {
+	// Verify that a no-op logger can be used to silence output
+	silentLogger := func(format string, args ...any) {}
+
+	config := DefaultServerConfig()
+	config.Logger = silentLogger
+
+	// This should not panic
+	config.Logger("test message %s", "value")
 }
 
 // --- Graceful Shutdown Tests ---
