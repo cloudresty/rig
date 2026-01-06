@@ -1075,6 +1075,48 @@ This approach keeps feature pages isolated while sharing common components acros
 
 &nbsp;
 
+### Rendering Partials Directly (HTMX / AJAX)
+
+For HTMX requests, AJAX updates, or any scenario where you need to render a fragment without the layout wrapper, use `Partial()`:
+
+```go
+// HTMX endpoint - returns just the table rows, no layout
+r.GET("/users/table", func(c *rig.Context) error {
+    users := getUsers()
+    return render.Partial(c, http.StatusOK, "components/user-table", map[string]any{
+        "Users": users,
+    })
+})
+
+// Dynamic widget update
+r.GET("/dashboard/stats", func(c *rig.Context) error {
+    stats := getStats()
+    return render.Partial(c, http.StatusOK, "_stats-widget", stats)
+})
+```
+
+&nbsp;
+
+| Function | Description |
+| :--- | :--- |
+| `render.Partial(c, status, name, data)` | Render partial via middleware (recommended) |
+| `render.PartialDirect(c, engine, status, name, data)` | Render partial with explicit engine |
+| `engine.RenderPartial(name, data)` | Low-level: returns HTML string |
+
+&nbsp;
+
+**Key differences from `HTML()`:**
+
+- Looks up templates in the shared partials set only (not regular templates)
+- Never wraps output in a layout
+- Perfect for HTMX `hx-get` / `hx-post` responses
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
 ### JSON and XML Responses
 
 Render JSON or XML directly without templates:

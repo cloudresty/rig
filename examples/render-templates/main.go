@@ -9,6 +9,8 @@
 //   - DevMode hot reloading
 //   - Error page fallback with HTMLSafe
 //   - Debug helper with dump function
+//   - Partial rendering for HTMX/AJAX (fragments without layout)
+//   - HTML minification for production
 package main
 
 import (
@@ -54,6 +56,10 @@ func main() {
 		// This allows pages to include components like {{template "components/card" .}}
 		// Note: Don't include "layouts" here since it's used as the Layout template.
 		SharedDirs: []string{"components"},
+
+		// Minify removes unnecessary whitespace from HTML output.
+		// Recommended for production. Safe for inline JS/CSS and <pre> blocks.
+		Minify: true,
 	})
 
 	// Add custom template functions (optional)
@@ -159,6 +165,25 @@ func main() {
 	})
 
 	// =========================================================================
+	// HTMX / Partial Routes - HTML fragments without layout
+	// =========================================================================
+
+	// GET /partials/user-table - Returns just the user table component (no layout)
+	// Perfect for HTMX hx-get requests that update part of the page
+	r.GET("/partials/user-table", func(c *rig.Context) error {
+		// Note: user-table expects the Users slice directly (not wrapped in map)
+		return render.Partial(c, http.StatusOK, "components/user-table", users)
+	})
+
+	// GET /partials/card - Returns a single card component
+	r.GET("/partials/card", func(c *rig.Context) error {
+		return render.Partial(c, http.StatusOK, "components/card", map[string]any{
+			"Title":   "Dynamic Card",
+			"Content": "This card was loaded via HTMX!",
+		})
+	})
+
+	// =========================================================================
 	// Start server
 	// =========================================================================
 
@@ -174,6 +199,10 @@ func main() {
 	log.Printf("  http://localhost%s/debug      - Debug page (dump helper)", addr)
 	log.Printf("  http://localhost%s/error-demo - Error page fallback", addr)
 	log.Printf("  http://localhost%s/api/users  - JSON API", addr)
+	log.Println("")
+	log.Println("HTMX/Partial endpoints (fragments without layout):")
+	log.Printf("  http://localhost%s/partials/user-table - User table component", addr)
+	log.Printf("  http://localhost%s/partials/card       - Card component", addr)
 	log.Println("")
 	log.Println("Content negotiation example:")
 	log.Printf("  curl -H 'Accept: application/json' http://localhost%s/users", addr)
