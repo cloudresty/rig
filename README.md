@@ -24,8 +24,9 @@
 - **Route Groups** - Organize routes with shared prefixes and middleware
 - **JSON Handling** - `Bind`, `BindStrict`, and `JSON` response helpers
 - **Static Files** - Serve directories with a single line
-- **Production Middleware** - Built-in `Recover` and `CORS` middleware
-- **Health Checks** - Liveness and readiness probes for Kubernetes
+- **Production Middleware** - Built-in `Recover`, `CORS`, and `Timeout` middleware
+- **Production-Safe Timeouts** - Server and request timeouts with Slowloris protection
+- **Health Checks** - Liveness and readiness probes with timeout support for Kubernetes
 - **HTML Templates** - Template rendering with layouts, partials, embed.FS, and content negotiation (`render/` sub-package)
 - **Authentication** - API Key and Bearer Token middleware (`auth/` sub-package)
 - **Request ID** - ULID-based request tracking (`requestid/` sub-package)
@@ -155,6 +156,7 @@ r.Use(Logger())          // Global - logs requests
 | `Recover()` | Catches panics and returns a 500 JSON error |
 | `DefaultCORS()` | Permissive CORS (allows all origins) |
 | `CORS(config)` | Configurable CORS with specific origins/methods/headers |
+| `Timeout(duration)` | Cancels request context after specified duration |
 
 &nbsp;
 
@@ -391,11 +393,128 @@ func main() {
 
 | Method | Description |
 | :--- | :--- |
-| `NewHealth()` | Creates a new Health manager |
+| `NewHealth()` | Creates a new Health manager with default 5s timeout |
+| `NewHealthWithConfig(config)` | Creates a Health manager with custom configuration |
 | `AddReadinessCheck(name, fn)` | Adds a check for traffic readiness (DB, Redis, etc.) |
+| `AddReadinessCheckContext(name, fn)` | Adds a context-aware check that respects timeouts |
 | `AddLivenessCheck(name, fn)` | Adds a check for app liveness (deadlock detection, etc.) |
 | `LiveHandler()` | Returns a handler for liveness probes |
 | `ReadyHandler()` | Returns a handler for readiness probes |
+
+&nbsp;
+
+### Health Check Timeouts
+
+Health checks have built-in timeout protection to prevent slow checks from blocking health endpoints:
+
+```go
+// Custom timeout configuration
+config := rig.HealthConfig{
+    CheckTimeout: 10 * time.Second,  // Per-check timeout (default: 5s)
+    Parallel:     true,              // Run checks concurrently (default: false)
+}
+health := rig.NewHealthWithConfig(config)
+
+// Context-aware check (receives timeout via context)
+health.AddReadinessCheckContext("database", func(ctx context.Context) error {
+    return db.PingContext(ctx)  // Respects the timeout
+})
+
+// Per-check timeout override
+health.AddReadinessCheckWithTimeout("slow-service", 30*time.Second, func(ctx context.Context) error {
+    return slowService.HealthCheck(ctx)
+})
+```
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
+## Timeouts
+
+Rig provides production-safe timeout defaults to protect against Slowloris attacks and cascading failures.
+
+&nbsp;
+
+### Server Timeouts (Infrastructure Layer)
+
+The `Run()` method applies production-safe defaults automatically:
+
+```go
+r := rig.New()
+r.Run(":8080")  // Uses DefaultServerConfig()
+```
+
+&nbsp;
+
+| Default | Value | Purpose |
+| :--- | :--- | :--- |
+| `ReadTimeout` | 5s | Prevents slow request body attacks |
+| `WriteTimeout` | 10s | Prevents slow response consumption |
+| `IdleTimeout` | 120s | Allows keep-alive but not indefinitely |
+| `ReadHeaderTimeout` | 2s | Critical Slowloris protection |
+| `MaxHeaderBytes` | 1MB | Prevents header size attacks |
+
+&nbsp;
+
+**Custom Configuration:**
+
+```go
+config := rig.DefaultServerConfig()
+config.Addr = ":8080"
+config.WriteTimeout = 30 * time.Second  // Allow longer responses
+
+r.RunWithConfig(config)
+```
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
+### Request Timeouts (Application Layer)
+
+Use `Timeout()` middleware to cancel slow handlers and prevent cascading failures:
+
+```go
+r := rig.New()
+r.Use(rig.Timeout(5 * time.Second))
+
+r.GET("/api/data", func(c *rig.Context) error {
+    // This query will be cancelled if it takes > 5s
+    result, err := db.QueryContext(c.Context(), "SELECT ...")
+    if err != nil {
+        return err  // Returns context.DeadlineExceeded if timed out
+    }
+    return c.JSON(http.StatusOK, result)
+})
+```
+
+&nbsp;
+
+**Custom timeout response:**
+
+```go
+r.Use(rig.TimeoutWithConfig(rig.TimeoutConfig{
+    Timeout: 5 * time.Second,
+    OnTimeout: func(c *rig.Context) error {
+        return c.JSON(http.StatusGatewayTimeout, map[string]string{
+            "error": "Request timed out",
+        })
+    },
+}))
+```
+
+&nbsp;
+
+> &nbsp;</br>
+> **IMPORTANT**</br>
+> Handlers must check `c.Context()` for this to work effectively.
+> Use `db.QueryContext(c.Context(), ...)` instead of `db.Query(...)`.</br>
+> &nbsp;
 
 &nbsp;
 

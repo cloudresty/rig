@@ -1,10 +1,13 @@
 package rig
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRecover_NoPanic(t *testing.T) {
@@ -391,5 +394,153 @@ func TestCORS_WildcardPreflight(t *testing.T) {
 	methods := w.Header().Get("Access-Control-Allow-Methods")
 	if !strings.Contains(methods, "PUT") {
 		t.Errorf("Access-Control-Allow-Methods = %q, should contain PUT", methods)
+	}
+}
+
+// --- Timeout Middleware Tests ---
+
+func TestTimeout_HandlerCompletesBeforeTimeout(t *testing.T) {
+	r := New()
+	r.Use(Timeout(1 * time.Second))
+
+	r.GET("/fast", func(c *Context) error {
+		return c.JSON(http.StatusOK, map[string]string{"status": "fast"})
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/fast", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	if resp["status"] != "fast" {
+		t.Errorf("status = %q, want %q", resp["status"], "fast")
+	}
+}
+
+func TestTimeout_HandlerExceedsTimeout(t *testing.T) {
+	r := New()
+	r.Use(Timeout(50 * time.Millisecond))
+
+	r.GET("/slow", func(c *Context) error {
+		// Simulate slow work
+		select {
+		case <-time.After(200 * time.Millisecond):
+			return c.JSON(http.StatusOK, map[string]string{"status": "completed"})
+		case <-c.Context().Done():
+			return c.Context().Err()
+		}
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/slow", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusGatewayTimeout {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusGatewayTimeout)
+	}
+
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	if resp["error"] != "request timed out" {
+		t.Errorf("error = %q, want %q", resp["error"], "request timed out")
+	}
+}
+
+func TestTimeout_ContextCancelledInHandler(t *testing.T) {
+	r := New()
+	r.Use(Timeout(100 * time.Millisecond))
+
+	contextCancelled := make(chan bool, 1)
+
+	r.GET("/check-context", func(c *Context) error {
+		// Wait for context to be cancelled
+		<-c.Context().Done()
+		contextCancelled <- true
+		return c.Context().Err()
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/check-context", nil)
+	r.ServeHTTP(w, req)
+
+	// Wait for the goroutine to signal or timeout
+	select {
+	case <-contextCancelled:
+		// Success - context was cancelled
+	case <-time.After(500 * time.Millisecond):
+		t.Error("context should have been cancelled")
+	}
+}
+
+func TestTimeoutWithConfig_CustomOnTimeout(t *testing.T) {
+	r := New()
+	r.Use(TimeoutWithConfig(TimeoutConfig{
+		Timeout: 50 * time.Millisecond,
+		OnTimeout: func(c *Context) error {
+			return c.JSON(http.StatusRequestTimeout, map[string]string{
+				"error":  "custom timeout",
+				"detail": "request took too long",
+			})
+		},
+	}))
+
+	r.GET("/slow", func(c *Context) error {
+		// Properly written handlers should check context
+		select {
+		case <-time.After(200 * time.Millisecond):
+			return c.JSON(http.StatusOK, map[string]string{"status": "completed"})
+		case <-c.Context().Done():
+			return c.Context().Err()
+		}
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/slow", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusRequestTimeout {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusRequestTimeout)
+	}
+
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	if resp["error"] != "custom timeout" {
+		t.Errorf("error = %q, want %q", resp["error"], "custom timeout")
+	}
+}
+
+func TestTimeout_ContextPassedToExternalCalls(t *testing.T) {
+	r := New()
+	r.Use(Timeout(100 * time.Millisecond))
+
+	var ctxReceived context.Context
+
+	r.GET("/external", func(c *Context) error {
+		ctxReceived = c.Context()
+		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/external", nil)
+	r.ServeHTTP(w, req)
+
+	if ctxReceived == nil {
+		t.Fatal("context should not be nil")
+	}
+
+	// Context should have a deadline
+	if _, ok := ctxReceived.Deadline(); !ok {
+		t.Error("context should have a deadline set by Timeout middleware")
 	}
 }

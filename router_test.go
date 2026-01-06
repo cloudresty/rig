@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNew(t *testing.T) {
@@ -1032,4 +1033,47 @@ func TestRouter_Static_PathValidation(t *testing.T) {
 	}()
 
 	r.Static("assets", ".") // missing leading slash
+}
+
+// --- Server Config Tests ---
+
+func TestDefaultServerConfig(t *testing.T) {
+	config := DefaultServerConfig()
+
+	if config.ReadTimeout != 5*time.Second {
+		t.Errorf("ReadTimeout = %v, want %v", config.ReadTimeout, 5*time.Second)
+	}
+	if config.WriteTimeout != 10*time.Second {
+		t.Errorf("WriteTimeout = %v, want %v", config.WriteTimeout, 10*time.Second)
+	}
+	if config.IdleTimeout != 120*time.Second {
+		t.Errorf("IdleTimeout = %v, want %v", config.IdleTimeout, 120*time.Second)
+	}
+	if config.ReadHeaderTimeout != 2*time.Second {
+		t.Errorf("ReadHeaderTimeout = %v, want %v", config.ReadHeaderTimeout, 2*time.Second)
+	}
+	if config.MaxHeaderBytes != 1<<20 {
+		t.Errorf("MaxHeaderBytes = %v, want %v", config.MaxHeaderBytes, 1<<20)
+	}
+}
+
+func TestServerConfig_CustomValues(t *testing.T) {
+	config := ServerConfig{
+		Addr:              ":9090",
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		MaxHeaderBytes:    2 << 20,
+	}
+
+	if config.Addr != ":9090" {
+		t.Errorf("Addr = %v, want :9090", config.Addr)
+	}
+	if config.ReadTimeout != 15*time.Second {
+		t.Errorf("ReadTimeout = %v, want %v", config.ReadTimeout, 15*time.Second)
+	}
+	if config.WriteTimeout != 30*time.Second {
+		t.Errorf("WriteTimeout = %v, want %v", config.WriteTimeout, 30*time.Second)
+	}
 }

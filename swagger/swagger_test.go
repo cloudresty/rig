@@ -211,4 +211,3 @@ func TestSwagger_ChainedBuilders(t *testing.T) {
 		t.Errorf("expected docExpansion 'full', got %q", s.docExpansion)
 	}
 }
-

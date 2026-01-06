@@ -44,9 +44,9 @@ var users = []User{
 func main() {
 	// Create the render engine with configuration
 	engine := render.New(render.Config{
-		Directory: "./templates",         // Template directory
-		Layout:    "layouts/base",         // Base layout for all pages
-		DevMode:   true,                   // Hot reload templates on each request
+		Directory: "./templates",  // Template directory
+		Layout:    "layouts/base", // Base layout for all pages
+		DevMode:   true,           // Hot reload templates on each request
 	})
 
 	// Add custom template functions (optional)
@@ -162,4 +162,3 @@ func main() {
 		log.Fatal(err)
 	}
 }
-

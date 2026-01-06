@@ -1078,8 +1078,8 @@ func TestEngine_DumpFunction(t *testing.T) {
 
 func TestHTMLSafe_Success(t *testing.T) {
 	testFS := fstest.MapFS{
-		"page.html":        {Data: []byte(`<h1>{{.Title}}</h1>`)},
-		"errors/500.html":  {Data: []byte(`<h1>Error: {{.Error}}</h1>`)},
+		"page.html":       {Data: []byte(`<h1>{{.Title}}</h1>`)},
+		"errors/500.html": {Data: []byte(`<h1>Error: {{.Error}}</h1>`)},
 	}
 
 	engine := New(Config{
