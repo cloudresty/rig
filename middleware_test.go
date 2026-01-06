@@ -63,6 +63,82 @@ func TestRecover_WithNilPanic(t *testing.T) {
 	r.ServeHTTP(w, req)
 }
 
+func TestRecoverWithConfig_CustomLogger(t *testing.T) {
+	var capturedErr any
+	var capturedStack []byte
+
+	r := New()
+	r.Use(RecoverWithConfig(RecoverConfig{
+		Logger: func(err any, stack []byte) {
+			capturedErr = err
+			capturedStack = stack
+		},
+	}))
+
+	r.GET("/panic", func(_ *Context) error {
+		panic("custom logger test")
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/panic", nil)
+	r.ServeHTTP(w, req)
+
+	// Verify custom logger was called
+	if capturedErr != "custom logger test" {
+		t.Errorf("capturedErr = %v, want 'custom logger test'", capturedErr)
+	}
+	if len(capturedStack) == 0 {
+		t.Error("capturedStack should not be empty")
+	}
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestRecoverWithConfig_SilentLogger(t *testing.T) {
+	r := New()
+	// Silent logger - no logging
+	r.Use(RecoverWithConfig(RecoverConfig{
+		Logger: func(_ any, _ []byte) {},
+	}))
+
+	r.GET("/panic", func(_ *Context) error {
+		panic("silent panic")
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/panic", nil)
+
+	// Should not panic and should return 500
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestRecoverWithConfig_NilLogger_UsesDefault(t *testing.T) {
+	r := New()
+	// Nil logger should use default (log.Printf)
+	r.Use(RecoverWithConfig(RecoverConfig{
+		Logger: nil,
+	}))
+
+	r.GET("/panic", func(_ *Context) error {
+		panic("default logger test")
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/panic", nil)
+
+	// Should not panic - default logger kicks in
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+}
+
 func TestCORS_AllowAllOrigins(t *testing.T) {
 	r := New()
 	r.Use(DefaultCORS())

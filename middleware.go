@@ -10,6 +10,17 @@ import (
 	"time"
 )
 
+// RecoverConfig defines the configuration for the Recover middleware.
+type RecoverConfig struct {
+	// Logger is called when a panic is recovered.
+	// It receives the panic value and stack trace.
+	// If nil, logs to stderr using the standard log package.
+	// Set to a no-op function to disable logging:
+	//   config.Logger = func(err any, stack []byte) {}
+	// Default: logs to stderr with "[RIG] PANIC:" prefix
+	Logger func(err any, stack []byte)
+}
+
 // Recover creates middleware that recovers from panics and returns a 500 error.
 // This ensures the server never crashes from unhandled panics in handlers.
 //
@@ -21,12 +32,35 @@ import (
 //	r := rig.New()
 //	r.Use(rig.Recover())
 func Recover() MiddlewareFunc {
+	return RecoverWithConfig(RecoverConfig{})
+}
+
+// RecoverWithConfig creates recover middleware with custom configuration.
+// This allows you to customize panic logging (e.g., send to structured logger).
+//
+// Example:
+//
+//	r.Use(rig.RecoverWithConfig(rig.RecoverConfig{
+//	    Logger: func(err any, stack []byte) {
+//	        slog.Error("panic recovered",
+//	            "error", err,
+//	            "stack", string(stack),
+//	        )
+//	    },
+//	}))
+func RecoverWithConfig(config RecoverConfig) MiddlewareFunc {
+	if config.Logger == nil {
+		config.Logger = func(err any, stack []byte) {
+			log.Printf("[RIG] PANIC: %v\n%s", err, stack)
+		}
+	}
+
 	return func(next HandlerFunc) HandlerFunc {
 		return func(c *Context) error {
 			defer func() {
 				if err := recover(); err != nil {
-					// Log panic to stderr so developers see it immediately
-					log.Printf("[RIG] PANIC: %v\n%s", err, debug.Stack())
+					// Log panic using configured logger
+					config.Logger(err, debug.Stack())
 
 					// Return a generic error to the client (don't leak internal details)
 					c.Status(http.StatusInternalServerError)

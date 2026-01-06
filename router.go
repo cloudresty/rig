@@ -12,6 +12,10 @@ import (
 	"time"
 )
 
+// LogFunc is a function type for logging server lifecycle events.
+// It follows the same signature as log.Printf.
+type LogFunc func(format string, args ...any)
+
 // ServerConfig holds the configuration for the HTTP server.
 // Use DefaultServerConfig() to get production-safe defaults that protect
 // against Slowloris attacks and connection leaks.
@@ -52,6 +56,13 @@ type ServerConfig struct {
 	// Only used by RunGracefully and RunWithGracefulShutdown.
 	// Default: 5 seconds.
 	ShutdownTimeout time.Duration
+
+	// Logger is called to log server lifecycle events (startup, shutdown).
+	// If nil, logs to stderr using the standard log package.
+	// Set to a no-op function to disable logging:
+	//   config.Logger = func(format string, args ...any) {}
+	// Default: log.Printf
+	Logger LogFunc
 }
 
 // DefaultServerConfig returns production-safe default timeouts.
@@ -65,6 +76,7 @@ type ServerConfig struct {
 //   - IdleTimeout: 120s - allows keep-alive but not indefinitely
 //   - MaxHeaderBytes: 1MB - prevents header size attacks
 //   - ShutdownTimeout: 5s - time for graceful shutdown
+//   - Logger: log.Printf - logs to stderr
 func DefaultServerConfig() ServerConfig {
 	return ServerConfig{
 		ReadTimeout:       0, // No body timeout - use Timeout middleware
@@ -73,6 +85,7 @@ func DefaultServerConfig() ServerConfig {
 		ReadHeaderTimeout: 5 * time.Second, // Slowloris protection
 		MaxHeaderBytes:    1 << 20,         // 1MB
 		ShutdownTimeout:   5 * time.Second,
+		Logger:            log.Printf,
 	}
 }
 
@@ -336,12 +349,18 @@ func (r *Router) RunWithGracefulShutdown(config ServerConfig) error {
 		MaxHeaderBytes:    config.MaxHeaderBytes,
 	}
 
+	// Use configured logger, default to log.Printf if not set
+	logf := config.Logger
+	if logf == nil {
+		logf = log.Printf
+	}
+
 	// Channel to listen for errors from the server
 	serverErrors := make(chan error, 1)
 
 	// Start the server in a goroutine so it doesn't block
 	go func() {
-		log.Printf("Rig server listening on %s", config.Addr)
+		logf("Rig server listening on %s", config.Addr)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErrors <- err
 		}
@@ -357,7 +376,7 @@ func (r *Router) RunWithGracefulShutdown(config ServerConfig) error {
 	case err := <-serverErrors:
 		return fmt.Errorf("server error: %w", err)
 	case sig := <-quit:
-		log.Printf("Shutdown signal received: %v", sig)
+		logf("Shutdown signal received: %v", sig)
 	}
 
 	// Use configured shutdown timeout, default to 5s if not set
@@ -370,12 +389,12 @@ func (r *Router) RunWithGracefulShutdown(config ServerConfig) error {
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
-	log.Println("Shutting down server...")
+	logf("Shutting down server...")
 	if err := server.Shutdown(ctx); err != nil {
 		return fmt.Errorf("server forced to shutdown: %w", err)
 	}
 
-	log.Println("Server exited gracefully")
+	logf("Server exited gracefully")
 	return nil
 }
 
