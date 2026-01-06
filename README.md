@@ -452,10 +452,10 @@ r.Run(":8080")  // Uses DefaultServerConfig()
 
 | Default | Value | Purpose |
 | :--- | :--- | :--- |
-| `ReadTimeout` | 5s | Prevents slow request body attacks |
+| `ReadHeaderTimeout` | 5s | Critical Slowloris protection (headers only) |
 | `WriteTimeout` | 10s | Prevents slow response consumption |
 | `IdleTimeout` | 120s | Allows keep-alive but not indefinitely |
-| `ReadHeaderTimeout` | 2s | Critical Slowloris protection |
+| `ReadTimeout` | 0 | No body limit (allows slow uploads) |
 | `MaxHeaderBytes` | 1MB | Prevents header size attacks |
 
 &nbsp;

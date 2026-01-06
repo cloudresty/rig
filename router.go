@@ -20,9 +20,9 @@ type ServerConfig struct {
 	Addr string
 
 	// ReadTimeout is the maximum duration for reading the entire request,
-	// including the body. This prevents clients from holding connections
-	// open indefinitely by sending data slowly.
-	// Default: 5 seconds.
+	// including the body. Setting this too low (e.g., 5s) will kill file uploads
+	// on slow connections. Use ReadHeaderTimeout for Slowloris protection instead.
+	// Default: 0 (no timeout - body reads are not time-limited).
 	ReadTimeout time.Duration
 
 	// WriteTimeout is the maximum duration before timing out writes of the
@@ -36,9 +36,9 @@ type ServerConfig struct {
 	IdleTimeout time.Duration
 
 	// ReadHeaderTimeout is the amount of time allowed to read request headers.
-	// This is a critical defense against Slowloris attacks where attackers
+	// This is the critical defense against Slowloris attacks where attackers
 	// send headers very slowly to exhaust server resources.
-	// Default: 2 seconds.
+	// Default: 5 seconds.
 	ReadHeaderTimeout time.Duration
 
 	// MaxHeaderBytes controls the maximum number of bytes the server will
@@ -55,23 +55,23 @@ type ServerConfig struct {
 }
 
 // DefaultServerConfig returns production-safe default timeouts.
-// These settings protect against Slowloris attacks and ensure connections
-// aren't held open indefinitely.
+// These settings protect against Slowloris attacks while remaining
+// permissive for legitimate slow clients (e.g., mobile file uploads).
 //
 // The defaults are:
-//   - ReadTimeout: 5s - prevents slow request body attacks
+//   - ReadTimeout: 0 - no body read timeout (use Timeout middleware for request limits)
+//   - ReadHeaderTimeout: 5s - critical Slowloris protection (headers only)
 //   - WriteTimeout: 10s - prevents slow response consumption
 //   - IdleTimeout: 120s - allows keep-alive but not indefinitely
-//   - ReadHeaderTimeout: 2s - critical Slowloris protection
 //   - MaxHeaderBytes: 1MB - prevents header size attacks
 //   - ShutdownTimeout: 5s - time for graceful shutdown
 func DefaultServerConfig() ServerConfig {
 	return ServerConfig{
-		ReadTimeout:       5 * time.Second,
+		ReadTimeout:       0, // No body timeout - use Timeout middleware
 		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       120 * time.Second,
-		ReadHeaderTimeout: 2 * time.Second,
-		MaxHeaderBytes:    1 << 20, // 1MB
+		ReadHeaderTimeout: 5 * time.Second, // Slowloris protection
+		MaxHeaderBytes:    1 << 20,         // 1MB
 		ShutdownTimeout:   5 * time.Second,
 	}
 }

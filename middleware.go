@@ -2,7 +2,9 @@ package rig
 
 import (
 	"context"
+	"log"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -10,6 +12,9 @@ import (
 
 // Recover creates middleware that recovers from panics and returns a 500 error.
 // This ensures the server never crashes from unhandled panics in handlers.
+//
+// Panics are logged to stderr with a full stack trace for debugging.
+// The client receives a generic 500 error to avoid leaking internal details.
 //
 // Example:
 //
@@ -20,10 +25,11 @@ func Recover() MiddlewareFunc {
 		return func(c *Context) error {
 			defer func() {
 				if err := recover(); err != nil {
-					// Log the stack trace here (optional)
-					// log.Printf("PANIC: %v\n%s", err, debug.Stack())
+					// Log panic to stderr so developers see it immediately
+					log.Printf("[RIG] PANIC: %v\n%s", err, debug.Stack())
 
-					// Return a generic error to the client
+					// Return a generic error to the client (don't leak internal details)
+					c.Status(http.StatusInternalServerError)
 					_ = c.JSON(http.StatusInternalServerError, map[string]string{
 						"error": "Internal Server Error",
 					})
@@ -196,9 +202,15 @@ type TimeoutConfig struct {
 // (databases, APIs) are slow. It works at the application layer, cancelling
 // the context that handlers should be checking.
 //
-// IMPORTANT: For this to work effectively, your handlers must:
+// IMPORTANT: For this to work effectively, your handlers MUST:
 //  1. Use c.Context() when making external calls (DB queries, HTTP requests)
 //  2. Check ctx.Done() in long-running loops
+//  3. Stop writing to the response immediately when context is cancelled
+//
+// WARNING: If your handler ignores ctx.Done() and continues writing to the
+// response after timeout, a race condition may occur. This is the standard
+// trade-off in high-performance Go frameworks (Gin, Echo use the same pattern).
+// Always check ctx.Err() before writing responses in long-running handlers.
 //
 // Example:
 //
