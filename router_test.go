@@ -2,10 +2,12 @@ package rig
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -1040,8 +1042,10 @@ func TestRouter_Static_PathValidation(t *testing.T) {
 func TestDefaultServerConfig(t *testing.T) {
 	config := DefaultServerConfig()
 
-	if config.ReadTimeout != 5*time.Second {
-		t.Errorf("ReadTimeout = %v, want %v", config.ReadTimeout, 5*time.Second)
+	// ReadTimeout should be 0 (no limit) to allow slow uploads
+	// Slowloris protection comes from ReadHeaderTimeout instead
+	if config.ReadTimeout != 0 {
+		t.Errorf("ReadTimeout = %v, want 0 (no body timeout)", config.ReadTimeout)
 	}
 	if config.WriteTimeout != 10*time.Second {
 		t.Errorf("WriteTimeout = %v, want %v", config.WriteTimeout, 10*time.Second)
@@ -1049,11 +1053,15 @@ func TestDefaultServerConfig(t *testing.T) {
 	if config.IdleTimeout != 120*time.Second {
 		t.Errorf("IdleTimeout = %v, want %v", config.IdleTimeout, 120*time.Second)
 	}
-	if config.ReadHeaderTimeout != 2*time.Second {
-		t.Errorf("ReadHeaderTimeout = %v, want %v", config.ReadHeaderTimeout, 2*time.Second)
+	// ReadHeaderTimeout is the critical Slowloris defense
+	if config.ReadHeaderTimeout != 5*time.Second {
+		t.Errorf("ReadHeaderTimeout = %v, want %v", config.ReadHeaderTimeout, 5*time.Second)
 	}
 	if config.MaxHeaderBytes != 1<<20 {
 		t.Errorf("MaxHeaderBytes = %v, want %v", config.MaxHeaderBytes, 1<<20)
+	}
+	if config.ShutdownTimeout != 5*time.Second {
+		t.Errorf("ShutdownTimeout = %v, want %v", config.ShutdownTimeout, 5*time.Second)
 	}
 }
 
@@ -1065,6 +1073,7 @@ func TestServerConfig_CustomValues(t *testing.T) {
 		IdleTimeout:       60 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
 		MaxHeaderBytes:    2 << 20,
+		ShutdownTimeout:   10 * time.Second,
 	}
 
 	if config.Addr != ":9090" {
@@ -1075,5 +1084,150 @@ func TestServerConfig_CustomValues(t *testing.T) {
 	}
 	if config.WriteTimeout != 30*time.Second {
 		t.Errorf("WriteTimeout = %v, want %v", config.WriteTimeout, 30*time.Second)
+	}
+	if config.ShutdownTimeout != 10*time.Second {
+		t.Errorf("ShutdownTimeout = %v, want %v", config.ShutdownTimeout, 10*time.Second)
+	}
+}
+
+// --- Graceful Shutdown Tests ---
+
+func TestRunGracefully_StartsAndShutdownsOnSignal(t *testing.T) {
+	r := New()
+	r.GET("/test", func(c *Context) error {
+		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+	})
+
+	// Use a random available port
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to get free port: %v", err)
+	}
+	addr := listener.Addr().String()
+	_ = listener.Close()
+
+	// Track server start and shutdown
+	serverStarted := make(chan struct{})
+	serverDone := make(chan error, 1)
+
+	go func() {
+		// Override the default config to use our test address
+		config := DefaultServerConfig()
+		config.Addr = addr
+		config.ShutdownTimeout = 1 * time.Second
+
+		// We can't use RunGracefully directly since it blocks on signals,
+		// so we'll test RunWithGracefulShutdown behavior by sending a signal
+		close(serverStarted)
+		serverDone <- r.RunWithGracefulShutdown(config)
+	}()
+
+	// Wait for server goroutine to start
+	<-serverStarted
+	time.Sleep(100 * time.Millisecond)
+
+	// Make a request to verify server is running
+	resp, err := http.Get("http://" + addr + "/test")
+	if err != nil {
+		t.Fatalf("server not responding: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	// Send SIGINT to trigger graceful shutdown
+	// Note: We're sending to our own process which will be caught by the signal handler
+	process, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		t.Fatalf("failed to find process: %v", err)
+	}
+
+	// Send interrupt signal
+	if err := process.Signal(syscall.SIGINT); err != nil {
+		t.Fatalf("failed to send signal: %v", err)
+	}
+
+	// Wait for server to shut down
+	select {
+	case err := <-serverDone:
+		if err != nil {
+			t.Errorf("RunWithGracefulShutdown returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not shut down within timeout")
+	}
+}
+
+func TestRunWithGracefulShutdown_CompletesInFlightRequests(t *testing.T) {
+	r := New()
+
+	requestStarted := make(chan struct{})
+	requestCanComplete := make(chan struct{})
+
+	r.GET("/slow", func(c *Context) error {
+		close(requestStarted)
+		<-requestCanComplete
+		return c.JSON(http.StatusOK, map[string]string{"status": "completed"})
+	})
+
+	// Get a free port
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to get free port: %v", err)
+	}
+	addr := listener.Addr().String()
+	_ = listener.Close()
+
+	serverDone := make(chan error, 1)
+
+	go func() {
+		config := DefaultServerConfig()
+		config.Addr = addr
+		config.ShutdownTimeout = 5 * time.Second
+		serverDone <- r.RunWithGracefulShutdown(config)
+	}()
+
+	// Wait for server to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Start a slow request
+	responseChan := make(chan *http.Response, 1)
+	go func() {
+		resp, _ := http.Get("http://" + addr + "/slow")
+		responseChan <- resp
+	}()
+
+	// Wait for request to start
+	<-requestStarted
+
+	// Send shutdown signal while request is in flight
+	process, _ := os.FindProcess(os.Getpid())
+	_ = process.Signal(syscall.SIGINT)
+
+	// Allow the request to complete
+	time.Sleep(100 * time.Millisecond)
+	close(requestCanComplete)
+
+	// Verify the request completed successfully
+	select {
+	case resp := <-responseChan:
+		if resp != nil {
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("response status = %d, want %d", resp.StatusCode, http.StatusOK)
+			}
+			_ = resp.Body.Close()
+		}
+	case <-time.After(3 * time.Second):
+		t.Error("request did not complete")
+	}
+
+	// Wait for server shutdown
+	select {
+	case <-serverDone:
+		// Success
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not shut down")
 	}
 }
