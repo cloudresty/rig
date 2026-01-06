@@ -1,0 +1,23 @@
+{{/*
+    User Table Component - Displays users in a styled table
+    Usage: {{template "components/user-table" .Users}}
+    Expected: slice of User structs with .ID, .Name, .Email fields
+*/}}
+<table style="width: 100%; border-collapse: collapse;">
+    <thead>
+        <tr style="background: #e2e8f0;">
+            <th style="padding: 10px; text-align: left;">ID</th>
+            <th style="padding: 10px; text-align: left;">Name</th>
+            <th style="padding: 10px; text-align: left;">Email</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .}}
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="padding: 10px;">{{.ID}}</td>
+            <td style="padding: 10px;">{{.Name}}</td>
+            <td style="padding: 10px;">{{.Email}}</td>
+        </tr>
+        {{end}}
+    </tbody>
+</table>

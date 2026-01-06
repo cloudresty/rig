@@ -108,6 +108,219 @@ func TestEngine_Load_LayoutNotFound(t *testing.T) {
 	}
 }
 
+// --- SharedDirs Tests ---
+
+func TestEngine_Load_WithSharedDirs(t *testing.T) {
+	engine := New(Config{
+		Directory:  "./testdata/templates_shareddirs",
+		SharedDirs: []string{"components", "base"},
+	})
+
+	if err := engine.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// Check that feature templates were loaded as regular templates
+	expectedTemplates := []string{"features/dashboard/index", "features/users/list"}
+	for _, name := range expectedTemplates {
+		if _, ok := engine.templates[name]; !ok {
+			t.Errorf("Template %q not loaded as regular template", name)
+		}
+	}
+
+	// Check that shared dirs templates were loaded as partials
+	expectedPartials := []string{"components/button", "components/card", "base/modal"}
+	partialNames := engine.PartialNames()
+	for _, name := range expectedPartials {
+		if !slices.Contains(partialNames, name) {
+			t.Errorf("Partial %q not loaded from SharedDirs", name)
+		}
+	}
+}
+
+func TestEngine_Load_SharedDirs_DirectoryBoundary(t *testing.T) {
+	// Test that SharedDirs correctly matches directory boundaries
+	// e.g., "components" should match "components/button" but not "components-extra/file"
+	engine := New(Config{
+		Directory:  "./testdata/templates_shareddirs",
+		SharedDirs: []string{"components"},
+	})
+
+	if err := engine.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// components/* should be partials
+	partialNames := engine.PartialNames()
+	if !slices.Contains(partialNames, "components/button") {
+		t.Error("components/button should be a partial")
+	}
+	if !slices.Contains(partialNames, "components/card") {
+		t.Error("components/card should be a partial")
+	}
+
+	// base/* should NOT be partials (not in SharedDirs)
+	if slices.Contains(partialNames, "base/modal") {
+		t.Error("base/modal should NOT be a partial (not in SharedDirs)")
+	}
+}
+
+func TestEngine_Render_WithSharedDirs(t *testing.T) {
+	engine := New(Config{
+		Directory:  "./testdata/templates_shareddirs",
+		SharedDirs: []string{"components", "base"},
+	})
+
+	if err := engine.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// Render dashboard which uses components
+	result, err := engine.Render("features/dashboard/index", nil)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	// Check that components were included
+	if !strings.Contains(result, "<h1>Dashboard</h1>") {
+		t.Error("Result should contain Dashboard heading")
+	}
+	if !strings.Contains(result, `<button class="btn">Click Me</button>`) {
+		t.Errorf("Result should contain button component, got: %s", result)
+	}
+	if !strings.Contains(result, `<div class="card">Stats Card</div>`) {
+		t.Errorf("Result should contain card component, got: %s", result)
+	}
+}
+
+func TestEngine_Render_SharedDirs_CrossFeature(t *testing.T) {
+	engine := New(Config{
+		Directory:  "./testdata/templates_shareddirs",
+		SharedDirs: []string{"components", "base"},
+	})
+
+	if err := engine.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// Render users list which uses components AND base
+	result, err := engine.Render("features/users/list", nil)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	// Check that both components and base partials were included
+	if !strings.Contains(result, `<div class="card">User Card</div>`) {
+		t.Errorf("Result should contain card component, got: %s", result)
+	}
+	if !strings.Contains(result, `<div class="modal">User Details</div>`) {
+		t.Errorf("Result should contain modal from base, got: %s", result)
+	}
+}
+
+func TestEngine_isShared(t *testing.T) {
+	tests := []struct {
+		name       string
+		path       string
+		sharedDirs []string
+		want       bool
+	}{
+		{
+			name:       "underscore prefix is always shared",
+			path:       "_partial.html",
+			sharedDirs: nil,
+			want:       true,
+		},
+		{
+			name:       "underscore in subdirectory",
+			path:       "pages/_sidebar.html",
+			sharedDirs: nil,
+			want:       true,
+		},
+		{
+			name:       "file in shared dir",
+			path:       "components/button.html",
+			sharedDirs: []string{"components"},
+			want:       true,
+		},
+		{
+			name:       "file in nested shared dir",
+			path:       "components/forms/input.html",
+			sharedDirs: []string{"components"},
+			want:       true,
+		},
+		{
+			name:       "file not in shared dir",
+			path:       "features/home.html",
+			sharedDirs: []string{"components"},
+			want:       false,
+		},
+		{
+			name:       "directory boundary check - similar prefix",
+			path:       "components-extra/widget.html",
+			sharedDirs: []string{"components"},
+			want:       false,
+		},
+		{
+			name:       "multiple shared dirs - first match",
+			path:       "base/modal.html",
+			sharedDirs: []string{"components", "base", "layouts"},
+			want:       true,
+		},
+		{
+			name:       "multiple shared dirs - second match",
+			path:       "layouts/main.html",
+			sharedDirs: []string{"components", "base", "layouts"},
+			want:       true,
+		},
+		{
+			name:       "empty shared dirs",
+			path:       "components/button.html",
+			sharedDirs: nil,
+			want:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := New(Config{
+				SharedDirs: tt.sharedDirs,
+			})
+
+			if got := engine.isShared(tt.path); got != tt.want {
+				t.Errorf("isShared(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEngine_SharedDirs_WithUnderscoreConvention(t *testing.T) {
+	// Test that underscore convention still works alongside SharedDirs
+	engine := New(Config{
+		Directory:  "./testdata/templates",
+		SharedDirs: []string{"layouts"}, // layouts is also a SharedDir
+	})
+
+	if err := engine.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	partialNames := engine.PartialNames()
+
+	// Underscore files should still be partials
+	if !slices.Contains(partialNames, "_footer") {
+		t.Error("_footer should be a partial (underscore convention)")
+	}
+	if !slices.Contains(partialNames, "_sidebar") {
+		t.Error("_sidebar should be a partial (underscore convention)")
+	}
+
+	// layouts/base should also be a partial (SharedDirs)
+	if !slices.Contains(partialNames, "layouts/base") {
+		t.Error("layouts/base should be a partial (SharedDirs)")
+	}
+}
+
 func TestEngine_Render_Simple(t *testing.T) {
 	engine := New(Config{
 		Directory: "./testdata/templates",

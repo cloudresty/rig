@@ -1,0 +1,15 @@
+{{/*
+    Alert Component - Displays an alert/notice box
+    Usage: {{template "components/alert" (dict "Type" "info" "Message" "Hello!")}}
+    Types: info (default), success, warning, error
+*/}}
+{{$type := "info"}}
+{{if .Type}}{{$type = .Type}}{{end}}
+<div class="alert alert-{{$type}}" style="padding: 15px; border-radius: 8px; margin: 15px 0;
+    {{if eq $type "success"}}background: #d1fae5; border: 1px solid #10b981; color: #065f46;
+    {{else if eq $type "warning"}}background: #fef3c7; border: 1px solid #f59e0b; color: #92400e;
+    {{else if eq $type "error"}}background: #fee2e2; border: 1px solid #ef4444; color: #991b1b;
+    {{else}}background: #dbeafe; border: 1px solid #3b82f6; color: #1e40af;{{end}}">
+    {{if .Message}}{{.Message}}{{else}}{{.}}{{end}}
+</div>
+

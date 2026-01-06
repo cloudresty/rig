@@ -1,10 +1,15 @@
 <h2>Welcome to Rig Render!</h2>
 
+{{/* Using the alert component from SharedDirs */}}
+{{template "components/alert" (map "Type" "info" "Message" "This demo showcases the SharedDirs feature for component-based templates!")}}
+
+{{/* Using the card component - demonstrates reusable UI components */}}
 <div class="card">
     <h3>Features Demonstrated</h3>
     <ul>
         <li>✅ <strong>Layouts</strong> - This page uses <code>layouts/base.html</code></li>
         <li>✅ <strong>Partials</strong> - Footer uses the <code>_footer.html</code> partial</li>
+        <li>✅ <strong>SharedDirs</strong> - Components loaded from <code>components/</code> directory</li>
         <li>✅ <strong>Data Binding</strong> - Message: <em>{{.Message}}</em></li>
         <li>✅ <strong>Content Negotiation</strong> - Try <code>Accept: application/json</code> header</li>
         <li>✅ <strong>Hot Reloading</strong> - Running in DevMode</li>
@@ -24,3 +29,5 @@
 
 <p>Current time: <strong>{{.Time}}</strong></p>
 
+{{/* Using the button component */}}
+{{template "components/button" (map "Text" "View Users →" "Href" "/users")}}

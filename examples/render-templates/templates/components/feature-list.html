@@ -1,0 +1,10 @@
+{{/*
+    Feature List Component - Displays a list of features with checkmarks
+    Usage: {{template "components/feature-list" .Features}}
+    Expected: slice of strings or structs with .Name field
+*/}}
+<ul class="feature-list">
+    {{range .}}
+    <li>✅ {{if .Name}}{{.Name}}{{else}}{{.}}{{end}}</li>
+    {{end}}
+</ul>

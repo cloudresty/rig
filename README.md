@@ -985,6 +985,63 @@ Use partials in any template:
 
 &nbsp;
 
+### Shared Directories (Component-Based Architecture)
+
+For larger applications, use `SharedDirs` to designate entire directories as globally available partials. This enables component-based architecture without requiring underscore prefixes:
+
+```go
+engine := render.New(render.Config{
+    Directory:  "./templates",
+    Layout:     "layouts/base",
+    SharedDirs: []string{"components", "layouts", "base"},
+})
+```
+
+&nbsp;
+
+Example directory structure:
+
+```text
+templates/
+├── components/           ← Shared (available everywhere)
+│   ├── button.html
+│   ├── card.html
+│   └── forms/
+│       └── input.html
+├── base/                 ← Shared (available everywhere)
+│   └── modal.html
+├── layouts/              ← Shared (available everywhere)
+│   └── base.html
+└── features/             ← Feature templates (isolated)
+    ├── dashboard/
+    │   └── index.html
+    └── users/
+        ├── list.html
+        └── profile.html
+```
+
+&nbsp;
+
+Feature templates can include shared components:
+
+```html
+<!-- features/dashboard/index.html -->
+<h1>Dashboard</h1>
+{{template "components/button" "Click Me"}}
+{{template "components/card" .Stats}}
+{{template "base/modal" .ModalData}}
+```
+
+&nbsp;
+
+This approach keeps feature pages isolated while sharing common components across the application. The underscore convention still works alongside `SharedDirs` - files starting with `_` are always treated as partials regardless of their directory.
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
 ### JSON and XML Responses
 
 Render JSON or XML directly without templates:
