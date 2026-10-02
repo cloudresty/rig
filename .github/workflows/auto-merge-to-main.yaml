@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - develop
+  # The scheduled dependency and Go-version workflows push to develop with
+  # GITHUB_TOKEN, which fires no push workflows, so they dispatch this one
+  # (and CI) explicitly. Only a dispatch on develop proceeds.
+  workflow_dispatch:
 
 # Every credential in this workflow is the built-in GITHUB_TOKEN, scoped here.
 # There is deliberately no PAT fallback: the org's CLOUDRESTY_GITBOT_PAT has
@@ -33,7 +37,7 @@ env:
   GO_VERSION: '1.25'
 
 jobs:
-  # Only run if this is a push to develop or a merged PR to develop
+  # Only run for a push to develop, or a dispatch on develop
   check-trigger:
     name: Check Trigger Conditions
     runs-on: ubuntu-latest
@@ -47,6 +51,11 @@ jobs:
 
           if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/develop" ]; then
             echo "Triggered by push to develop branch"
+            SHOULD_PROCEED=true
+          fi
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.ref }}" = "refs/heads/develop" ]; then
+            echo "Dispatched on develop"
             SHOULD_PROCEED=true
           fi
 
