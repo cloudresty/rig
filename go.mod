@@ -1,5 +1,5 @@
 module github.com/cloudresty/rig
 
-go 1.25.4
+go 1.27.1
 
 require github.com/cloudresty/ulid v1.2.1
