@@ -15,6 +15,10 @@ type Context struct {
 	writer  http.ResponseWriter
 	request *http.Request
 
+	// resp is the status-recording wrapper that writer points at. It is kept
+	// separately so the recorded status can be read without a type assertion.
+	resp *responseWriter
+
 	// written tracks whether the response has been written
 	written bool
 
@@ -27,10 +31,16 @@ type Context struct {
 }
 
 // newContext creates a new Context from the given ResponseWriter and Request.
+//
+// The writer is wrapped so the status code actually sent is recorded however
+// it is written, including through c.Writer() by code that never touches
+// Context's own helpers.
 func newContext(w http.ResponseWriter, r *http.Request) *Context {
+	rw := newResponseWriter(w)
 	return &Context{
-		writer:  w,
+		writer:  rw,
 		request: r,
+		resp:    rw,
 	}
 }
 
@@ -39,7 +49,12 @@ func (c *Context) Request() *http.Request {
 	return c.request
 }
 
-// Writer returns the underlying http.ResponseWriter.
+// Writer returns the response writer for this request.
+//
+// It is a thin wrapper around the http.ResponseWriter the server passed in,
+// which records the status code sent (see StatusCode). It implements
+// http.Flusher, http.Hijacker, http.Pusher and io.ReaderFrom by delegation,
+// and http.ResponseController can unwrap it.
 func (c *Context) Writer() http.ResponseWriter {
 	return c.writer
 }
@@ -248,9 +263,29 @@ func (c *Context) Path() string {
 	return c.request.URL.Path
 }
 
-// Written returns true if the response has been written.
+// Written returns true if the response has been written, whether through
+// Context's helpers or directly through c.Writer() (e.g. http.Error).
 func (c *Context) Written() bool {
-	return c.written
+	return c.written || c.StatusCode() != 0
+}
+
+// StatusCode returns the HTTP status code sent to the client, or 0 if nothing
+// has been written yet.
+//
+// It reflects the first final status passed to WriteHeader, by any code path,
+// or 200 once a body was written or flushed without one. Informational 1xx
+// codes other than 101 are not final and are not reported. A hijacked
+// connection whose handler wrote no status through the writer reports 101
+// Switching Protocols, since the handler wrote its status line on the raw
+// connection (the websocket upgrade case).
+func (c *Context) StatusCode() int {
+	if c.resp == nil {
+		return 0
+	}
+	if c.resp.status == 0 && c.resp.hijacked {
+		return http.StatusSwitchingProtocols
+	}
+	return c.resp.status
 }
 
 // Set stores a value in the context's key-value store.

@@ -1405,6 +1405,7 @@ The `examples/` directory contains runnable examples:
 | `BindStrict(v)` | Decode JSON body (reject unknown fields) |
 | `JSON(code, v)` | Send JSON response |
 | `Status(code)` | Set status code |
+| `StatusCode()` | Status code sent to the client (0 if nothing written yet) |
 | `Redirect(code, url)` | Send redirect |
 | `File(path)` | Serve a file |
 | `Data(code, contentType, data)` | Send raw bytes |
@@ -1414,7 +1415,7 @@ The `examples/` directory contains runnable examples:
 | `Context()` | Get `context.Context` |
 | `SetContext(ctx)` | Set `context.Context` |
 | `Request()` | Get `*http.Request` |
-| `Writer()` | Get `http.ResponseWriter` |
+| `Writer()` | Get the `http.ResponseWriter` (status-recording; keeps Flusher, Hijacker, Pusher, ReaderFrom) |
 
 &nbsp;
 
