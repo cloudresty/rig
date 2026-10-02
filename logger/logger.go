@@ -28,20 +28,24 @@
 //
 // # Status Code Tracking
 //
-// Note: Due to the design of the rig framework, the logger cannot capture
-// the exact HTTP status code. It infers the status based on whether an
-// error was returned from the handler:
-//   - No error: 200 OK
-//   - Error returned: 500 Internal Server Error
+// The logged status is the one the client received, read from
+// rig.Context.StatusCode. It is correct however the handler wrote it:
+// Context helpers (JSON, Status, Data, Redirect), or directly through
+// c.Writer() (http.Error, http.NotFound, WriteHeader). A body written without
+// an explicit status is logged as 200.
 //
-// For more accurate status tracking, consider using a custom response writer
-// wrapper in your application.
+// When the handler wrote nothing at all, the status is not yet decided when
+// the logger runs, because the router's error handler runs after the
+// middleware chain returns. It is then logged as 200 if the handler returned
+// nil (net/http's implicit status) and 500 if it returned an error (the
+// DefaultErrorHandler's status; a custom error handler may send another).
 package logger
 
 import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"time"
 
@@ -100,7 +104,7 @@ type LogEntry struct {
 //
 // The middleware logs each request after it completes, including:
 //   - Timestamp
-//   - HTTP status code (inferred from error)
+//   - HTTP status code sent to the client
 //   - Request latency
 //   - Client IP address
 //   - HTTP method and path
@@ -151,11 +155,7 @@ func New(config ...Config) rig.MiddlewareFunc {
 			// Get client IP
 			clientIP := getClientIP(c)
 
-			// Infer status code from error
-			status := 200
-			if err != nil {
-				status = 500
-			}
+			status := responseStatus(c, err)
 
 			// Build log entry
 			entry := LogEntry{
@@ -185,6 +185,21 @@ func New(config ...Config) rig.MiddlewareFunc {
 			return err
 		}
 	}
+}
+
+// responseStatus returns the status code to log for a completed handler.
+//
+// It is the status actually sent when anything was written. Only when the
+// handler wrote nothing does it fall back to what the router will send next:
+// net/http's implicit 200, or the error handler's 500 for a returned error.
+func responseStatus(c *rig.Context, err error) int {
+	if status := c.StatusCode(); status != 0 {
+		return status
+	}
+	if err != nil {
+		return http.StatusInternalServerError
+	}
+	return http.StatusOK
 }
 
 // writeText writes a log entry in text format.

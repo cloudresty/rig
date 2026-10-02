@@ -303,8 +303,15 @@ func TestContext_RequestAndWriter(t *testing.T) {
 		t.Error("Request() did not return the original request")
 	}
 
-	if c.Writer() != w {
-		t.Error("Writer() did not return the original writer")
+	// Writer() wraps the original to record the status sent; it must still
+	// write to it, and unwrap to it for http.ResponseController.
+	u, ok := c.Writer().(interface{ Unwrap() http.ResponseWriter })
+	if !ok || u.Unwrap() != w {
+		t.Error("Writer() does not unwrap to the original writer")
+	}
+	_, _ = c.Writer().Write([]byte("through"))
+	if w.Body.String() != "through" {
+		t.Errorf("Writer() did not write to the original writer: %q", w.Body.String())
 	}
 }
 
