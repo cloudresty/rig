@@ -24,6 +24,13 @@ on:
           - major
           - auto
 
+# GITHUB_TOKEN only, no PAT fallback.
+#   contents: write  push the release tag and create the GitHub release
+#   actions: read    find the CI run for the released commit
+permissions:
+  contents: write
+  actions: read
+
 env:
   GO_VERSION: '1.25'
 
@@ -42,7 +49,7 @@ jobs:
       - name: Wait for CI workflow
         id: wait
         env:
-          GH_TOKEN: ${{ secrets.CLOUDRESTY_GITBOT_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "Waiting for CI workflow to complete..."
 
