@@ -11,7 +11,10 @@ on:
   workflow_dispatch:
     inputs:
       release_type:
-        description: 'Type of release (patch, minor, major)'
+        # 'auto' derives the bump from commit messages exactly as a push to
+        # main does. Auto Merge to Main dispatches with it, because its
+        # GITHUB_TOKEN merge cannot fire the push trigger above.
+        description: 'Type of release (patch, minor, major, or auto from commit messages)'
         required: true
         default: 'patch'
         type: choice
@@ -19,6 +22,7 @@ on:
           - patch
           - minor
           - major
+          - auto
 
 env:
   GO_VERSION: '1.25'
@@ -182,7 +186,7 @@ jobs:
           # Determine release type
           RELEASE_TYPE="patch"
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.release_type }}" != "auto" ]; then
             RELEASE_TYPE="${{ github.event.inputs.release_type }}"
           else
             # Auto-determine based on commit messages since last tag
