@@ -124,10 +124,10 @@ func TestStreamingFlushReachesTheClient(t *testing.T) {
 // http.ResponseController rather than a type assertion.
 func TestResponseControllerFlushWorks(t *testing.T) {
 	r := New()
-	var flushErr error
+	flushErr := make(chan error, 1)
 	r.GET("/x", func(c *Context) error {
 		_, _ = c.WriteString("x")
-		flushErr = http.NewResponseController(c.Writer()).Flush()
+		flushErr <- http.NewResponseController(c.Writer()).Flush()
 		return nil
 	})
 	srv := serve(t, r)
@@ -137,8 +137,8 @@ func TestResponseControllerFlushWorks(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
-	if flushErr != nil {
-		t.Errorf("ResponseController.Flush through the wrapper: %v", flushErr)
+	if err := <-flushErr; err != nil {
+		t.Errorf("ResponseController.Flush through the wrapper: %v", err)
 	}
 }
 
