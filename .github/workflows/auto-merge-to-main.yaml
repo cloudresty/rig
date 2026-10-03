@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 # Every credential in this workflow is the built-in GITHUB_TOKEN, scoped here.
-# There is deliberately no PAT fallback: the org's CLOUDRESTY_GITBOT_PAT has
+# There is deliberately no PAT fallback: the org bot PAT used previously had
 # no pull-request access to this repository, so `gh pr create` failed with
 # "Resource not accessible by personal access token" on every release and
 # PRs #10-#12 had to be opened by hand.
