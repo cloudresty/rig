@@ -473,6 +473,7 @@ health.AddReadinessCheckWithTimeout("slow-service", 30*time.Second, func(ctx con
 - **Probes are cache reads.** Each check runs in its own background evaluator (interval, timeout, jittered first run); the handlers return the last result and never run a check. A result older than 3x its interval is reported as `FAIL: stale`, so a wedged evaluator is itself a signal.
 - **Three levels.** `OK`, `DEGRADED` (always HTTP 200, with a detail line) and `FAIL`. A `Gating` check turns the probe into a 503 only after `WithGrace(n)` consecutive failures (readiness default 1, liveness default 3); an `Informational` check is reported but never affects the status.
 - **Liveness cannot do I/O by construction.** `RegisterLiveness` accepts only an `InProcessCheck`, which you can get from `Watchdog.Liveness()` or `FromFacts(...)`, never from an arbitrary function. A liveness FAIL is held for a stable per-pod jitter (0 to `WithLivenessHold`, default 120s, seeded from the hostname) before the endpoint answers 503, so replicas never restart together. Liveness is OK until a check's first evaluation, so a slow first run cannot kill the pod.
+- **The registry watches itself.** A built-in liveness entry `evaluator` fails if `Start` is not called within 30s of `MarkWired`, or if an evaluator loop stops for any reason other than `Deregister` or shutdown; once the `Start` context is cancelled it reports `DEGRADED: shutting down`. A panic inside a liveness check degrades, never fails. A result older than max(3x interval, 30s) is stale, so use liveness intervals of 10s or more. The first evaluation of every check runs within 2s of `Start`.
 - **Listen first, then wire.** Until `MarkWired()` readiness and startup FAIL with `starting` and liveness is OK.
 
 ```go
@@ -578,14 +579,16 @@ func main() {
 
 | API | Description |
 | :--- | :--- |
-| `health.New(opts...)` | `WithProbeBudget`, `WithClock`, `WithJitter`, `WithLivenessHold` |
+| `health.New(opts...)` | `WithClock`, `WithJitter`, `WithLivenessHold` |
 | `RegisterReadiness(name, check, opts...)` | `WithInterval` (10s), `WithTimeout` (3s, capped at the interval), `WithKind`, `WithGrace` |
 | `RegisterLiveness(name, inProcessCheck, opts...)` | Same options; default grace 3 |
 | `MarkWired()` / `Start(ctx)` / `Wait()` | Wiring complete / launch the evaluators / join them |
+| `Deregister(name)` | Remove a check from every scope and stop only its evaluator; `Register*` panics on a duplicate or reserved name (`wired`, `evaluator`), so replace = `Deregister` then register |
 | `Snapshot(scope)` | Cached view for `Readiness`, `Liveness` or `Startup` |
 | `LiveHandler()` `ReadyHandler()` `StartupHandler()` | `http.HandlerFunc`; wrap with `health.Adapt` for a `rig.Router` |
-| `NewWatchdog(name, soft, hard, depsHealthy)` | `Begin(label)`, `Beat()`, `Liveness()`, `Readiness()` |
-| `Freshness(name, maxAge, lastAt)` / `FromFacts(f)` | Timestamp check / in-memory verdict adapter |
+| `NewWatchdog(name, soft, hard, depsHealthy, opts...)` | `Begin(label)`, `Beat()`, `Liveness()`, `Readiness()` |
+| `Freshness` / `FreshnessDegraded(name, maxAge, lastAt, opts...)` | Timestamp check, FAIL or DEGRADED when stale; uses the registry clock, or `WithNow` |
+| `FromFacts(f)` | Adapter that marks an in-memory verdict as liveness-safe |
 
 &nbsp;
 
