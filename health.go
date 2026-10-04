@@ -45,6 +45,14 @@ type healthCheck struct {
 }
 
 // Health manages liveness and readiness probes.
+//
+// Health is the legacy binary manager: checks run inline inside the probe
+// request, sequentially by default, so one slow dependency can push a probe
+// past the kubelet timeout, and there is no "degraded" state. It is kept
+// unchanged for existing users. New code should use the
+// github.com/cloudresty/rig/health package, which evaluates checks in the
+// background, serves cached tri-state results and restricts liveness to
+// in-process facts.
 type Health struct {
 	mu        sync.RWMutex
 	readiness []healthCheck
