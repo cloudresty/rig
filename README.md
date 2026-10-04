@@ -27,7 +27,7 @@
 - **Production Middleware** - Built-in `Recover`, `CORS`, and `Timeout` middleware
 - **Production-Safe Timeouts** - Server and request timeouts with Slowloris protection
 - **Graceful Shutdown** - Zero-downtime deployments with `RunGracefully()`
-- **Health Checks** - Liveness and readiness probes with timeout support for Kubernetes
+- **Health Checks** - Liveness and readiness probes with timeout support for Kubernetes; the `rig/health` subpackage adds cached tri-state (OK / DEGRADED / FAIL) probes, a watchdog and a startup probe
 - **HTML Templates** - Template rendering with layouts, partials, embed.FS, and content negotiation (`render/` sub-package)
 - **Authentication** - API Key and Bearer Token middleware (`auth/` sub-package)
 - **Request ID** - ULID-based request tracking (`requestid/` sub-package)
@@ -459,6 +459,137 @@ health.AddReadinessCheckWithTimeout("slow-service", 30*time.Second, func(ctx con
     return slowService.HealthCheck(ctx)
 })
 ```
+
+&nbsp;
+
+🔝 [back to top](#rig)
+
+&nbsp;
+
+## Functional Health (`rig/health`)
+
+`rig.Health` above is binary and runs every check inside the probe request, so a slow dependency can push a probe past the kubelet timeout and "working but worrying" has no representation. The `github.com/cloudresty/rig/health` subpackage is its replacement for services that need probes they can trust. `rig.Health` is unchanged and stays available.
+
+- **Probes are cache reads.** Each check runs in its own background evaluator (interval, timeout, jittered first run); the handlers return the last result and never run a check. A result older than 3x its interval is reported as `FAIL: stale`, so a wedged evaluator is itself a signal.
+- **Three levels.** `OK`, `DEGRADED` (always HTTP 200, with a detail line) and `FAIL`. A `Gating` check turns the probe into a 503 only after `WithGrace(n)` consecutive failures (readiness default 1, liveness default 3); an `Informational` check is reported but never affects the status.
+- **Liveness cannot do I/O by construction.** `RegisterLiveness` accepts only an `InProcessCheck`, which you can get from `Watchdog.Liveness()` or `FromFacts(...)`, never from an arbitrary function. A liveness FAIL is held for a stable per-pod jitter (0 to `WithLivenessHold`, default 120s, seeded from the hostname) before the endpoint answers 503, so replicas never restart together. Liveness is OK until a check's first evaluation, so a slow first run cannot kill the pod.
+- **The registry watches itself.** A built-in liveness entry `evaluator` fails if `Start` is not called within 30s of `MarkWired`, or if an evaluator loop stops for any reason other than `Deregister` or shutdown; once the `Start` context is cancelled it reports `DEGRADED: shutting down`. A panic inside a liveness check degrades, never fails. A result older than max(3x interval, 30s) is stale, so use liveness intervals of 10s or more. The first evaluation of every check runs within 2s of `Start`.
+- **Reserved names.** `wired` (readiness and startup) and `evaluator` (liveness) are synthetic entries owned by the registry; registering a check with either name panics. `Deregister(name)` removes the name from both scopes, and `WithNow` on `Freshness`/`NewWatchdog` must be the same clock as `WithClock`.
+- **Listen first, then wire.** Until `MarkWired()` readiness and startup FAIL with `starting` and liveness is OK.
+
+```go
+func main() {
+    ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+    defer stop()
+
+    reg := health.New()
+    r := rig.New()
+    g := r.Group("/health")
+    g.GET("/live", health.Adapt(reg.LiveHandler()))
+    g.GET("/ready", health.Adapt(reg.ReadyHandler()))
+    g.GET("/startup", health.Adapt(reg.StartupHandler()))
+    go r.Run(":8080") // the server listens BEFORE anything is wired
+    reg.Start(ctx)
+
+    // 1. A gating dependency: a background loop pings Mongo and records the
+    //    last success; the check only reads that timestamp (no I/O in the
+    //    evaluator, no I/O in the probe).
+    var mongoOK atomic.Int64 // unix nanos of the last successful ping
+    go func() {
+        for t := time.NewTicker(5 * time.Second); ; {
+            if client.Ping(ctx, nil) == nil {
+                mongoOK.Store(time.Now().UnixNano())
+            }
+            select {
+            case <-ctx.Done():
+                return
+            case <-t.C:
+            }
+        }
+    }()
+    reg.RegisterReadiness("mongodb",
+        health.Freshness("mongodb", 20*time.Second, func() time.Time {
+            if n := mongoOK.Load(); n != 0 {
+                return time.Unix(0, n)
+            }
+            return time.Time{}
+        }),
+        health.WithInterval(5*time.Second), health.WithGrace(2))
+
+    // 2. A broker client's own in-memory verdict, mapped to a level.
+    //    (Illustrative: names follow go-rabbitmq's v1.13.0 health API; check
+    //    the released signatures.) FromFacts takes no context, so it cannot do
+    //    I/O. Assess already requires "stalled AND client connected", which is
+    //    the dependency guard liveness needs.
+    var prev rabbitmq.DeliveryStats
+    brokerFacts := health.FromFacts(func() (health.Level, string) {
+        cur := publisher.DeliveryHealth()
+        v := cur.Assess(prev, client.State(), rabbitmq.DefaultHealthPolicy())
+        prev = cur.Stats()
+        switch v.Verdict {
+        case rabbitmq.HealthDegraded:
+            return health.Degraded, v.Reason
+        case rabbitmq.HealthStalled:
+            return health.Failed, v.Reason
+        }
+        return health.OK, ""
+    })
+    reg.RegisterLiveness("publisher-confirms", brokerFacts, health.WithGrace(3))
+
+    // 3. A watchdog around a unit of work: DEGRADED past the soft limit, and a
+    //    liveness FAIL past the hard limit only while the dependencies are healthy.
+    wd := health.NewWatchdog("sync", 2*time.Hour, 3*time.Hour+18*time.Minute, func() bool {
+        return reg.Snapshot(health.Readiness).Status != health.Failed
+    })
+    reg.RegisterLiveness("sync", wd.Liveness())
+    reg.RegisterReadiness("sync", wd.Readiness(), health.WithKind(health.Informational))
+
+    go func() {
+        for {
+            end := wd.Begin("discovery")
+            runSync(ctx, wd) // call wd.Beat() as it makes progress
+            end()
+            select {
+            case <-ctx.Done():
+                return
+            case <-time.After(time.Hour):
+            }
+        }
+    }()
+
+    reg.MarkWired() // last line of wiring: readiness and startup can now pass
+    <-ctx.Done()
+    reg.Wait()
+}
+```
+
+**Response format** (a superset of `rig.Health`'s `{"status","checks"}`; a passing check is still the bare string `"OK"`):
+
+```json
+// GET /health/ready
+{
+  "status": "DEGRADED",
+  "checks": { "mongodb": "OK", "sync": "DEGRADED: sync: running 2h5m0s in phase discovery, past soft limit 2h0m0s" },
+  "informational": {},
+  "details": { "mongodb": "mongodb: last success 3s ago" },
+  "evaluatedAt": "2026-10-04T20:14:05Z"
+}
+```
+
+`status` is `OK`, `DEGRADED` or `FAIL` (the legacy manager wrote `Service Unavailable` for a failure; rely on the HTTP status code, not that string). `details` carries the detail of passing checks; `held` appears (and the status stays 200) while a liveness FAIL is inside its jitter hold; `evaluatedAt` is the oldest evaluation among the gating checks.
+
+| API | Description |
+| :--- | :--- |
+| `health.New(opts...)` | `WithClock`, `WithJitter`, `WithLivenessHold` |
+| `RegisterReadiness(name, check, opts...)` | `WithInterval` (10s), `WithTimeout` (3s, capped at the interval), `WithKind`, `WithGrace` |
+| `RegisterLiveness(name, inProcessCheck, opts...)` | Same options; default grace 3 |
+| `MarkWired()` / `Start(ctx)` / `Wait()` | Wiring complete / launch the evaluators / join them |
+| `Deregister(name)` | Remove a check from every scope and stop only its evaluator; `Register*` panics on a duplicate or reserved name (`wired`, `evaluator`), so replace = `Deregister` then register |
+| `Snapshot(scope)` | Cached view for `Readiness`, `Liveness` or `Startup` |
+| `LiveHandler()` `ReadyHandler()` `StartupHandler()` | `http.HandlerFunc`; wrap with `health.Adapt` for a `rig.Router` |
+| `NewWatchdog(name, soft, hard, depsHealthy, opts...)` | `Begin(label)`, `Beat()`, `Liveness()`, `Readiness()` |
+| `Freshness` / `FreshnessDegraded(name, maxAge, lastAt, opts...)` | Timestamp check, FAIL or DEGRADED when stale; uses the registry clock, or `WithNow` |
+| `FromFacts(f)` | Adapter that marks an in-memory verdict as liveness-safe |
 
 &nbsp;
 
