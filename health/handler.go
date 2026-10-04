@@ -9,7 +9,7 @@ import (
 )
 
 // wireBody is the JSON body. It is a superset of the root rig.Health shape
-// ({"status","checks"}): "informational", "details", "held" and "evaluatedAt"
+// ({"status","checks"}): "informational", "details", "held", "note" and "evaluatedAt" (omitted when nothing has been evaluated)
 // are additions, and a passing check is still the bare string "OK".
 type wireBody struct {
 	Status        string            `json:"status"`
@@ -17,7 +17,8 @@ type wireBody struct {
 	Informational map[string]string `json:"informational"`
 	Details       map[string]string `json:"details,omitempty"`
 	Held          bool              `json:"held,omitempty"`
-	EvaluatedAt   string            `json:"evaluatedAt"`
+	Note          string            `json:"note,omitempty"`
+	EvaluatedAt   string            `json:"evaluatedAt,omitempty"`
 }
 
 func render(s Snapshot) wireBody {
@@ -26,7 +27,10 @@ func render(s Snapshot) wireBody {
 		Checks:        make(map[string]string, len(s.Checks)),
 		Informational: make(map[string]string, len(s.Informational)),
 		Held:          s.Held,
-		EvaluatedAt:   s.EvaluatedAt.UTC().Format(time.RFC3339),
+		Note:          s.Note,
+	}
+	if !s.EvaluatedAt.IsZero() {
+		b.EvaluatedAt = s.EvaluatedAt.UTC().Format(time.RFC3339)
 	}
 	for _, m := range []struct {
 		src map[string]CheckState
@@ -60,26 +64,11 @@ func write(w http.ResponseWriter, code int, v any) {
 }
 
 func (r *Registry) handler(scope Scope) http.HandlerFunc {
-	return func(w http.ResponseWriter, req *http.Request) {
-		// The snapshot only reads cached state and calls no user code, so it
-		// cannot legitimately block. The budget is a backstop: a probe always
-		// answers, and a stuck read is reported as a FAIL, not as a timeout.
-		ch := make(chan Snapshot, 1)
-		go func() { ch <- r.snap(scope) }()
-		timer := time.NewTimer(r.budget)
-		defer timer.Stop()
-		select {
-		case s := <-ch:
-			write(w, s.Code, render(s))
-		case <-timer.C:
-			write(w, http.StatusServiceUnavailable, wireBody{
-				Status:        Failed.String(),
-				Checks:        map[string]string{"probe": "FAIL: probe budget exceeded"},
-				Informational: map[string]string{},
-				EvaluatedAt:   r.now().UTC().Format(time.RFC3339),
-			})
-		case <-req.Context().Done():
-		}
+	return func(w http.ResponseWriter, _ *http.Request) {
+		// Snapshot reads cached state and calls no user code, so it is
+		// answered inline: it cannot block on a dependency.
+		s := r.Snapshot(scope)
+		write(w, s.Code, render(s))
 	}
 }
 

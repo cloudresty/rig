@@ -34,16 +34,25 @@ type unit struct {
 // plus a margin). depsHealthy reports whether the pod's gating dependencies
 // are currently healthy; liveness never fails while it returns false. A nil
 // depsHealthy means "no gating dependencies" and is treated as always true.
-func NewWatchdog(name string, soft, hard time.Duration, depsHealthy func() bool) *Watchdog {
+// The clock defaults to time.Now; pass WithNow(sameFuncAsWithClock) to share
+// the registry's clock.
+func NewWatchdog(name string, soft, hard time.Duration, depsHealthy func() bool, opts ...ClockOption) *Watchdog {
 	if depsHealthy == nil {
 		depsHealthy = func() bool { return true }
+	}
+	var cfg clockCfg
+	for _, o := range opts {
+		o(&cfg)
+	}
+	if cfg.now == nil {
+		cfg.now = time.Now
 	}
 	return &Watchdog{
 		name:        name,
 		soft:        soft,
 		hard:        hard,
 		depsHealthy: depsHealthy,
-		now:         time.Now,
+		now:         cfg.now,
 		inflight:    make(map[uint64]unit),
 	}
 }

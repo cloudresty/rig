@@ -51,7 +51,7 @@ func TestIntervalAndFirstRunJitter(t *testing.T) {
 		start := time.Now()
 		stop := run(r)
 		defer stop()
-		first := r.frac("readiness/db", 10*time.Second)
+		first := r.frac("readiness/db", firstRunJitterCap)
 		time.Sleep(first - time.Nanosecond)
 		synctest.Wait()
 		if runs.Load() != 0 {
@@ -229,7 +229,7 @@ func TestLivenessHoldJitter(t *testing.T) {
 		}
 		stop := run(r)
 		defer stop()
-		first := r.frac("liveness/w", 10*time.Second) // first evaluation = failure onset (grace 1)
+		first := r.frac("liveness/w", firstRunJitterCap) // first evaluation = failure onset (grace 1)
 		time.Sleep(first + time.Millisecond)
 		synctest.Wait()
 		if hold < 2*time.Millisecond {
@@ -342,7 +342,7 @@ func TestCheckHonouringContextTimesOutAndRecovers(t *testing.T) {
 	})
 }
 
-func TestCheckPanicIsFailureNotCrash(t *testing.T) {
+func TestReadinessPanicIsFailureNotCrash(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := New(WithJitter(1))
 		r.RegisterReadiness("boom", func(context.Context) Result { panic("kaboom") }, WithInterval(10*time.Second))
@@ -512,20 +512,6 @@ func TestHandlersNeverRunChecks(t *testing.T) {
 	if calls.Load() != 0 {
 		t.Fatalf("probes invoked checks %d times", calls.Load())
 	}
-}
-
-func TestHandlerAnswersWithinBudgetWhenSnapshotBlocks(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		block := make(chan struct{})
-		r := New(WithProbeBudget(2 * time.Second))
-		r.snap = func(Scope) Snapshot { <-block; return Snapshot{} }
-		start := time.Now()
-		code, _, body := call(r.ReadyHandler())
-		if code != 503 || time.Since(start) != 2*time.Second || !strings.Contains(body.Checks["probe"], "budget") {
-			t.Fatalf("code=%d took=%s body=%+v", code, time.Since(start), body)
-		}
-		close(block)
-	})
 }
 
 func TestJSONShapeIsSupersetOfRigHealth(t *testing.T) {

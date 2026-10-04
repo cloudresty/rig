@@ -15,9 +15,14 @@ type InProcessCheck struct {
 	fn func(ctx context.Context) Result
 }
 
-// FromFacts adapts a function over facts already held in memory (for example
-// a client library's pure "assess" verdict) to an InProcessCheck. The function
-// takes no context on purpose: it must not block on I/O.
+// FromFacts adapts a function to an InProcessCheck. It can wrap any func: the
+// type does not inspect what f does. What it prevents is handing
+// RegisterLiveness a raw Check (which receives a context and is built for
+// I/O) by accident, so crossing into liveness is always an explicit,
+// reviewable FromFacts call. f takes no context; it must read only facts the
+// process already holds (for example a client library's pure in-memory
+// verdict) and must not block on I/O. A panic in f degrades liveness; it
+// never fails it.
 func FromFacts(f func() (Level, string)) InProcessCheck {
 	if f == nil {
 		panic("health: FromFacts requires a non-nil function")
@@ -28,22 +33,54 @@ func FromFacts(f func() (Level, string)) InProcessCheck {
 	}}
 }
 
-// Freshness returns a readiness-style Check that is OK while lastAt() is no
-// older than maxAge, and Failed otherwise (including when lastAt() is the
-// zero time, meaning "never succeeded"). It reads a timestamp that a
-// background loop keeps current, so the check itself does no I/O: pair it
-// with a goroutine that pings the dependency and stores the success time.
-// Register it with WithKind(Informational) where staleness should only be
-// reported.
-func Freshness(name string, maxAge time.Duration, lastAt func() time.Time) Check {
-	return func(context.Context) Result {
+// ClockOption overrides the clock used by Freshness and NewWatchdog. Pass the
+// same function given to WithClock so every component ages data against one
+// clock.
+type ClockOption func(*clockCfg)
+
+type clockCfg struct{ now func() time.Time }
+
+// WithNow sets the clock for Freshness or NewWatchdog.
+func WithNow(now func() time.Time) ClockOption { return func(c *clockCfg) { c.now = now } }
+
+// Freshness returns a Check that is OK while lastAt() is no older than
+// maxAge, and Failed otherwise (including when lastAt() is the zero time,
+// meaning "never succeeded"). It reads a timestamp that a background loop
+// keeps current, so the check itself does no I/O: pair it with a goroutine
+// that pings the dependency and stores the success time.
+//
+// The clock is, in order: a WithNow option, the clock of the Registry that is
+// evaluating it (WithClock), time.Now. Use FreshnessDegraded where staleness
+// should be worrying but not gating; Informational is not a substitute, since
+// the informational map does not affect the reported status.
+func Freshness(name string, maxAge time.Duration, lastAt func() time.Time, opts ...ClockOption) Check {
+	return freshness(name, maxAge, lastAt, Failed, opts)
+}
+
+// FreshnessDegraded is Freshness that reports Degraded (HTTP 200, visible in
+// the aggregate status) instead of Failed when the timestamp is stale or
+// missing.
+func FreshnessDegraded(name string, maxAge time.Duration, lastAt func() time.Time, opts ...ClockOption) Check {
+	return freshness(name, maxAge, lastAt, Degraded, opts)
+}
+
+func freshness(name string, maxAge time.Duration, lastAt func() time.Time, stale Level, opts []ClockOption) Check {
+	var cfg clockCfg
+	for _, o := range opts {
+		o(&cfg)
+	}
+	return func(ctx context.Context) Result {
+		now := cfg.now
+		if now == nil {
+			now = clockFrom(ctx)
+		}
 		t := lastAt()
 		if t.IsZero() {
-			return Result{Failed, name + ": never succeeded"}
+			return Result{stale, name + ": never succeeded"}
 		}
-		age := time.Since(t)
+		age := now().Sub(t)
 		if age > maxAge {
-			return Result{Failed, fmt.Sprintf("%s: last success %s ago (max %s)", name, age.Round(time.Second), maxAge)}
+			return Result{stale, fmt.Sprintf("%s: last success %s ago (max %s)", name, age.Round(time.Second), maxAge)}
 		}
 		return Result{OK, fmt.Sprintf("%s: last success %s ago", name, age.Round(time.Second))}
 	}
