@@ -219,10 +219,14 @@ func (r *Registry) spawnLocked(e *entry) {
 	go r.loop(ectx, e)
 }
 
-// Deregister removes the named check from every scope and stops its
+// Deregister removes the named check from BOTH scopes (readiness and
+// liveness): a name registered in each is removed from each. It stops its
 // evaluator (only that one: the cancellation is per entry). It reports
 // whether anything was removed. A run already in flight may still finish in
-// the background; its result is discarded.
+// the background; its result is discarded. If the name is registered again, a
+// still-running call of the old entry (a check that ignores its context) can
+// overlap the new entry's first run, so check functions must tolerate
+// concurrent invocation when they are replaced.
 func (r *Registry) Deregister(name string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -410,7 +414,7 @@ func staleAfter(interval time.Duration) time.Duration {
 }
 
 // state applies the grace and stale rules to the cached result.
-func (e *entry) state(now time.Time) CheckState {
+func (e *entry) state(now time.Time, draining bool) CheckState {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	st := CheckState{Kind: e.kind}
@@ -424,6 +428,13 @@ func (e *entry) state(now time.Time) CheckState {
 		return st
 	}
 	st.Level, st.Detail, st.Evaluated, st.EvaluatedAt = e.res.Level, e.res.Detail, true, e.at
+	if draining && e.scope == Liveness {
+		// The evaluators stopped because the service is shutting down, so
+		// the cached result will only age. Neither stale nor the last
+		// verdict may fail liveness during a long SIGTERM drain.
+		st.Level, st.Detail = Degraded, "evaluator stopped (shutting down)"
+		return st
+	}
 	if age := now.Sub(e.at); age > staleAfter(e.interval) {
 		st.Level = Failed
 		st.Detail = fmt.Sprintf("stale: last evaluated %s ago (interval %s)", age.Round(time.Second), e.interval)
@@ -475,7 +486,7 @@ func (r *Registry) Snapshot(scope Scope) Snapshot {
 	oldest := time.Time{}
 	allEvaluated := true
 	for _, e := range ents {
-		st := e.state(now)
+		st := e.state(now, shuttingDown)
 		if e.kind == Informational {
 			s.Informational[e.name] = st
 			continue
@@ -505,7 +516,7 @@ func (r *Registry) Snapshot(scope Scope) Snapshot {
 			// Every liveness entry must have been evaluated too, so a pod
 			// whose liveness evaluators never ran cannot pass startup.
 			for _, e := range live {
-				if st := e.state(now); !st.Evaluated {
+				if st := e.state(now, false); !st.Evaluated {
 					allEvaluated = false
 					st.Level, st.Detail = Failed, "not evaluated" // for startup, unlike liveness itself
 					s.Checks["liveness/"+e.name] = st

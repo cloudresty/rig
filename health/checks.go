@@ -40,7 +40,9 @@ type ClockOption func(*clockCfg)
 
 type clockCfg struct{ now func() time.Time }
 
-// WithNow sets the clock for Freshness or NewWatchdog.
+// WithNow sets the clock for Freshness or NewWatchdog. It MUST be the same
+// function passed to the registry's WithClock, otherwise ages computed here
+// and the registry's stale and grace rules disagree about what time it is.
 func WithNow(now func() time.Time) ClockOption { return func(c *clockCfg) { c.now = now } }
 
 // Freshness returns a Check that is OK while lastAt() is no older than

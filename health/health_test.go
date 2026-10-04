@@ -117,17 +117,25 @@ func TestStaleRule(t *testing.T) {
 
 func TestStaleAppliesToLivenessAndBypassesGrace(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		var offset atomic.Int64
-		clock := func() time.Time { return time.Now().Add(time.Duration(offset.Load())) }
-		r := New(WithClock(clock), WithJitter(1), WithLivenessHold(0))
-		r.RegisterLiveness("w", FromFacts(func() (Level, string) { return OK, "" }), WithInterval(10*time.Second), WithGrace(5))
+		release := make(chan struct{})
+		defer close(release)
+		var calls atomic.Int32
+		r := New(WithJitter(1), WithLivenessHold(0))
+		// Healthy once, then wedged forever (ignores ctx): the evaluator
+		// cannot record anything new while the registry itself is running.
+		r.RegisterLiveness("w", InProcessCheck{fn: func(context.Context) Result {
+			if calls.Add(1) > 1 {
+				<-release
+			}
+			return Result{}
+		}}, WithInterval(10*time.Second), WithGrace(5), WithTimeout(time.Second))
 		r.MarkWired()
 		stop := run(r)
 		defer stop()
 		time.Sleep(11 * time.Second)
 		synctest.Wait()
-		stop()
-		offset.Store(int64(40 * time.Second))
+		time.Sleep(60 * time.Second)
+		synctest.Wait()
 		s := r.Snapshot(Liveness)
 		if s.Status != Failed || s.Code != 503 || !strings.Contains(s.Checks["w"].Detail, "stale") {
 			t.Fatalf("want liveness stale FAIL, got %+v", s)

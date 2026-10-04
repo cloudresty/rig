@@ -296,3 +296,26 @@ func TestEvaluatedAtOmittedWhenNothingEvaluated(t *testing.T) {
 		t.Fatalf("unwired liveness: %v", raw)
 	}
 }
+
+func TestLivenessSurvivesLongShutdownDrain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := New(WithJitter(1), WithLivenessHold(0))
+		r.RegisterLiveness("w", FromFacts(func() (Level, string) { return OK, "" }), WithInterval(10*time.Second), WithGrace(1))
+		r.RegisterReadiness("db", fixed(OK, ""), WithInterval(10*time.Second))
+		r.MarkWired()
+		ctx, cancel := context.WithCancel(context.Background())
+		r.Start(ctx)
+		time.Sleep(15 * time.Second)
+		synctest.Wait()
+		cancel()
+		r.Wait()
+		time.Sleep(60 * time.Second) // well past the stale threshold
+		code, _, body := call(r.LiveHandler())
+		if code != 200 || body.Status != "DEGRADED" || body.Checks["w"] != "DEGRADED: evaluator stopped (shutting down)" {
+			t.Fatalf("liveness must stay 200/DEGRADED through the drain: %d %+v", code, body)
+		}
+		if code, _, body := call(r.ReadyHandler()); code != 503 || !strings.Contains(body.Checks["db"], "stale") {
+			t.Fatalf("readiness behaviour during drain is unchanged (stale FAIL): %d %+v", code, body)
+		}
+	})
+}
