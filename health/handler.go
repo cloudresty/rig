@@ -3,6 +3,8 @@ package health
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
+	"strconv"
 	"time"
 
 	"github.com/cloudresty/rig"
@@ -21,13 +23,16 @@ type wireBody struct {
 	EvaluatedAt   string            `json:"evaluatedAt,omitempty"`
 }
 
-func render(s Snapshot) wireBody {
+// render builds the wire body. Every string in it, keys included, passes
+// through r.scrub: this is the only place a body is built, so no check,
+// assessor, watchdog or FromFacts path can bypass the credential scrubber.
+func (r *Registry) render(s Snapshot) wireBody {
 	b := wireBody{
-		Status:        s.Status.String(),
+		Status:        r.scrub(s.Status.String()),
 		Checks:        make(map[string]string, len(s.Checks)),
 		Informational: make(map[string]string, len(s.Informational)),
 		Held:          s.Held,
-		Note:          s.Note,
+		Note:          r.scrub(s.Note),
 	}
 	if !s.EvaluatedAt.IsZero() {
 		b.EvaluatedAt = s.EvaluatedAt.UTC().Format(time.RFC3339)
@@ -36,13 +41,26 @@ func render(s Snapshot) wireBody {
 		src map[string]CheckState
 		dst map[string]string
 	}{{s.Checks, b.Checks}, {s.Informational, b.Informational}} {
-		for name, st := range m.src {
-			m.dst[name] = line(st)
+		names := make([]string, 0, len(m.src))
+		for name := range m.src {
+			names = append(names, name)
+		}
+		sort.Strings(names) // deterministic collision handling below
+		for _, name := range names {
+			st := m.src[name]
+			key := r.scrub(name)
+			for n := 2; ; n++ {
+				if _, taken := m.dst[key]; !taken {
+					break
+				}
+				key = r.scrub(name) + "#" + strconv.Itoa(n)
+			}
+			m.dst[key] = r.scrub(line(st))
 			if st.Level == OK && st.Detail != "" {
 				if b.Details == nil {
 					b.Details = map[string]string{}
 				}
-				b.Details[name] = st.Detail
+				b.Details[key] = r.scrub(st.Detail)
 			}
 		}
 	}
@@ -60,7 +78,9 @@ func write(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false) // keep "<redacted>" readable; JSON-equivalent
+	_ = enc.Encode(v)
 }
 
 func (r *Registry) handler(scope Scope) http.HandlerFunc {
@@ -68,7 +88,7 @@ func (r *Registry) handler(scope Scope) http.HandlerFunc {
 		// Snapshot reads cached state and calls no user code, so it is
 		// answered inline: it cannot block on a dependency.
 		s := r.Snapshot(scope)
-		write(w, s.Code, render(s))
+		write(w, s.Code, r.render(s))
 	}
 }
 
