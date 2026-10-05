@@ -29,6 +29,15 @@
 // Watchdog.Liveness or FromFacts. A liveness FAIL is additionally held for a
 // per-pod jitter (see WithLivenessHold) so replicas do not restart together.
 //
+// # Probe bodies are scrubbed
+//
+// A health body is a security boundary. Every string rendered into
+// /health/live, /health/ready and /health/startup (check names, details, error
+// text) is passed through ScrubCredentials, always, at the render layer, so a
+// URI carrying a password never reaches a probe whatever check produced it.
+// WithScrubber adds extra patterns after the built-in rules; nothing disables
+// them.
+//
 // This package imports nothing outside the standard library and the root rig
 // package (for Adapt), and nothing about brokers or databases: callers map
 // their own client's verdict to a Level, typically through FromFacts.
