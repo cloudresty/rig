@@ -42,6 +42,9 @@ type Registry struct {
 	seed int64
 	hold time.Duration
 
+	// extraScrub runs after the built-in credential scrubber (see WithScrubber).
+	extraScrub []func(string) string
+
 	mu            sync.RWMutex
 	readiness     []*entry
 	liveness      []*entry

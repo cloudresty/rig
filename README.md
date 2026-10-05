@@ -475,6 +475,7 @@ health.AddReadinessCheckWithTimeout("slow-service", 30*time.Second, func(ctx con
 - **Liveness cannot do I/O by construction.** `RegisterLiveness` accepts only an `InProcessCheck`, which you can get from `Watchdog.Liveness()` or `FromFacts(...)`, never from an arbitrary function. A liveness FAIL is held for a stable per-pod jitter (0 to `WithLivenessHold`, default 120s, seeded from the hostname) before the endpoint answers 503, so replicas never restart together. Liveness is OK until a check's first evaluation, so a slow first run cannot kill the pod.
 - **The registry watches itself.** A built-in liveness entry `evaluator` fails if `Start` is not called within 30s of `MarkWired`, or if an evaluator loop stops for any reason other than `Deregister` or shutdown; once the `Start` context is cancelled it reports `DEGRADED: shutting down`. A panic inside a liveness check degrades, never fails. A result older than max(3x interval, 30s) is stale, so use liveness intervals of 10s or more. The first evaluation of every check runs within 2s of `Start`.
 - **Reserved names.** `wired` (readiness and startup) and `evaluator` (liveness) are synthetic entries owned by the registry; registering a check with either name panics. `Deregister(name)` removes the name from both scopes, and `WithNow` on `Freshness`/`NewWatchdog` must be the same clock as `WithClock`.
+- **Probe bodies never carry credentials.** Every string in `/health/live`, `/health/ready` and `/health/startup` (check names, details, error text) passes through `health.ScrubCredentials` before it is written, on by default and applied at the render layer so no check, watchdog or `FromFacts` path can bypass it. `amqp://u:pw@host` becomes `amqp://<redacted>@host` (everything up to the last `@`, whatever the password contains; the host stays), `password=`/`pass=`/`passwd=`/`pwd=`/`secret=`/`token=` values and scheme-less `user:pw@host` are redacted too, and it over-redacts rather than leak. `ScrubCredentials` is exported so you can reuse it for logs and client ping errors; `health.WithScrubber(f)` adds your own patterns after the built-in one and can never disable it.
 - **Listen first, then wire.** Until `MarkWired()` readiness and startup FAIL with `starting` and liveness is OK.
 
 ```go
@@ -580,7 +581,8 @@ func main() {
 
 | API | Description |
 | :--- | :--- |
-| `health.New(opts...)` | `WithClock`, `WithJitter`, `WithLivenessHold` |
+| `health.New(opts...)` | `WithClock`, `WithJitter`, `WithLivenessHold`, `WithScrubber` |
+| `health.ScrubCredentials(s)` | The credential scrubber applied to every probe body, exported for logs and ping errors |
 | `RegisterReadiness(name, check, opts...)` | `WithInterval` (10s), `WithTimeout` (3s, capped at the interval), `WithKind`, `WithGrace` |
 | `RegisterLiveness(name, inProcessCheck, opts...)` | Same options; default grace 3 |
 | `MarkWired()` / `Start(ctx)` / `Wait()` | Wiring complete / launch the evaluators / join them |
