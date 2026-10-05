@@ -27,30 +27,40 @@ var scrubCases = []struct {
 	{"https userinfo", "GET https://bot:S3cr3t@api.example.com/v1 returned 500", []string{"S3cr3t"}, []string{"https://<redacted>@api.example.com/v1", "returned 500"}},
 	{"http userinfo", "http://bot:S3cr3t@api.example.com", []string{"S3cr3t"}, []string{"api.example.com"}},
 	{"uppercase scheme", "AMQP://guest:S3cr3t@broker.internal", []string{"S3cr3t"}, []string{"AMQP://<redacted>@broker.internal"}},
-	{"password contains ://", "amqp://u:p4ss://S3cr3t@broker.internal:5672", []string{"S3cr3t", "p4ss", "u:"}, []string{"amqp://<redacted>@broker.internal:5672"}},
-	{"password contains @", "amqp://u:S3cr3t@x@broker.internal:5672", []string{"S3cr3t", "x@"}, []string{"amqp://<redacted>@broker.internal:5672"}},
-	{"password contains @ and ://", "amqp://u:S3cr3t@q://z@broker.internal", []string{"S3cr3t", "q://z"}, []string{"amqp://<redacted>@broker.internal"}},
-	{"password contains space and quotes", `amqp://u:S3 "cr'3t@broker.internal:5672`, []string{"S3", "cr'3t"}, []string{"amqp://<redacted>@broker.internal:5672"}},
+	{"password contains ://", "amqp://u:p4ss://S3cr3t@broker.internal:5672", []string{"S3cr3t", "p4ss", "u:"}, []string{"amqp://<redacted>"}},
+	{"password contains @", "amqp://u:S3cr3t@x@broker.internal:5672", []string{"S3cr3t", "x@"}, []string{"amqp://<redacted>"}},
+	{"password contains @ and ://", "amqp://u:S3cr3t@q://z@broker.internal", []string{"S3cr3t", "q://z"}, []string{"amqp://<redacted>"}},
+	{"password contains space and quotes", `amqp://u:S3 "cr'3t@broker.internal:5672`, []string{"S3", "cr'3t"}, []string{"amqp://<redacted>"}},
 	{"password contains <>", "amqp://u:S3<cr>3t@broker.internal", []string{"S3<cr>", "3t@"}, []string{"amqp://<redacted>@broker.internal"}},
 	{"password contains slash and colon", "postgres://u:S3/cr:3t@db.internal/app", []string{"S3/cr", "cr:3t"}, []string{"postgres://<redacted>@db.internal/app"}},
-	{"two URIs", "primary amqp://a:S3cr3t@h1.internal:5672 fallback amqps://b:Pw0rd@h2.internal:5671", []string{"S3cr3t", "Pw0rd"}, []string{"amqp://<redacted>@h1.internal:5672", "amqps://<redacted>@h2.internal:5671", "primary", "fallback"}},
-	{"two URIs quoted", `"amqp://a:S3cr3t@h1.internal","mongodb://b:Pw0rd@h2.internal"`, []string{"S3cr3t", "Pw0rd"}, []string{"h1.internal", "h2.internal"}},
-	{"password= param", "connect failed host=db.internal password=S3cr3t&sslmode=require", []string{"S3cr3t"}, []string{"host=db.internal", "password=<redacted>&sslmode=require"}},
+	{"two URIs", "primary amqp://a:S3cr3t@h1.internal:5672 fallback amqps://b:Pw0rd@h2.internal:5671", []string{"S3cr3t", "Pw0rd"}, []string{"amqp://<redacted>", "primary"}},
+	{"two URIs quoted", `"amqp://a:S3cr3t@h1.internal","mongodb://b:Pw0rd@h2.internal"`, []string{"S3cr3t", "Pw0rd"}, []string{"amqp://<redacted>"}},
+	{"password= param", "connect failed host=db.internal password=S3cr3t&sslmode=require", []string{"S3cr3t"}, []string{"host=db.internal", "password=<redacted>"}},
 	{"password= with a:b@c", "password=a:b@c0nfid3ntial", []string{"a:b", "c0nfid3ntial"}, []string{"password=<redacted>"}},
-	{"password= ends at quote", `dsn "password=S3cr3t" host`, []string{"S3cr3t"}, []string{`"password=<redacted>"`, "host"}},
-	{"password= ends at newline", "password=S3cr3t\nnext line", []string{"S3cr3t"}, []string{"password=<redacted>\nnext line"}},
+	{"password= ends at quote", `dsn "password=S3cr3t" host`, []string{"S3cr3t"}, []string{`"password=<redacted>`}},
+	{"password= ends at newline", "password=S3cr3t\nnext line", []string{"S3cr3t"}, []string{"password=<redacted>"}},
 	{"password= with spaces", "password=S3 cr3t pa ss", []string{"S3", "cr3t", "pa ss"}, []string{"password=<redacted>"}},
-	{"pass=", "pass=S3cr3t&x=1", []string{"S3cr3t"}, []string{"pass=<redacted>&x=1"}},
+	{"pass=", "pass=S3cr3t&x=1", []string{"S3cr3t"}, []string{"pass=<redacted>"}},
 	{"passwd=", "passwd=S3cr3t", []string{"S3cr3t"}, []string{"passwd=<redacted>"}},
 	{"pwd=", "pwd=S3cr3t", []string{"S3cr3t"}, []string{"pwd=<redacted>"}},
-	{"secret=", "client secret=S3cr3t&id=1", []string{"S3cr3t"}, []string{"secret=<redacted>&id=1"}},
+	{"secret=", "client secret=S3cr3t&id=1", []string{"S3cr3t"}, []string{"secret=<redacted>"}},
 	{"token=", "token=S3cr3t", []string{"S3cr3t"}, []string{"token=<redacted>"}},
 	{"param mixed case", "PassWord=S3cr3t", []string{"S3cr3t"}, []string{"PassWord=<redacted>"}},
-	{"param in URI query", "amqp://u:S3cr3t@h.internal/?token=T0k3n&heartbeat=10", []string{"S3cr3t", "T0k3n"}, []string{"h.internal", "heartbeat=10"}},
-	{"param then URI", "password=P4ss://x@y&url=amqp://u:S3cr3t@broker.internal", []string{"P4ss", "S3cr3t"}, []string{"broker.internal"}},
+	{"param in URI query", "amqp://u:S3cr3t@h.internal/?token=T0k3n&heartbeat=10", []string{"S3cr3t", "T0k3n"}, []string{"amqp://<redacted>@h.internal/?token=<redacted>"}},
+	{"param then URI", "password=P4ss://x@y&url=amqp://u:S3cr3t@broker.internal", []string{"P4ss", "S3cr3t"}, []string{"password=<redacted>"}},
 	{"scheme-less", "dial svc: root:S3cr3t@db.internal:5432 refused", []string{"S3cr3t", "root"}, []string{"<redacted>@db.internal:5432", "refused"}},
-	{"scheme-less password with colon and @", "root:a:S3cr3t@T41l@db.internal:5432", []string{"S3cr3t", "root", "T41l"}, []string{"@db.internal:5432"}},
+	{"scheme-less password with colon and @", "root:a:S3cr3t@T41l@db.internal:5432", []string{"S3cr3t", "root", "T41l"}, []string{"<redacted>"}},
 	{"scheme-less in quotes", `err="root:S3cr3t@db.internal"`, []string{"S3cr3t", "root"}, []string{"@db.internal"}},
+	{"leak1 two schemes in password", "mongodb://admin:s3@cr:et/pa ss\"'x://y@db:27017/x", []string{"cr:et", "pa ss", "admin", "s3@"}, []string{"mongodb://<redacted>"}},
+	{"leak2 amqp split", "amqp://u:s3@cr:et/pa ss\"'zz://yy@broker:5672/", []string{"cr:et", "pa ss", "s3@"}, []string{"amqp://<redacted>"}},
+	{"leak3 param then quoted @", "password=a:b@c amqp://u:x\"q@y@broker:5672/", []string{"q@y", "a:b", "x\"q"}, []string{"password=<redacted>"}},
+	{"leak4 password embeds param", "dial amqp://u:p&password=zz@h:1/", []string{"p&password", "u:p", "zz"}, []string{"dial amqp://<redacted>"}},
+	{"leak5 scheme-less colon scheme", "user:pa://ss@host", []string{"user:pa", "pa://ss"}, nil},
+	{"param in query with @", "amqp://h/?password=a:b@c&x=1", []string{"a:b", "c&x"}, []string{"amqp://<redacted>"}},
+	{"scheme-less two @", "root:p@ss@db.internal:1 tail", []string{"p@ss", "root"}, nil},
+	{"fuzz: param value with @ behind a colon", ":?password=@aaa&x=10", []string{"@aaa", "x=10"}, []string{"<redacted>"}},
+	{"fuzz: userinfo before a case-1 URI", "0000000@?password=\"aaaaamqp://@&x=10", []string{"0000000", "aaaaamqp"}, []string{"<redacted>"}},
+	{"fuzz: userinfo fragment before a scheme after =", "svc: root:atoken=aamqp://@db.internal:5432 refused", []string{"root:a", "atoken", "aamqp"}, nil},
 	{"URI in JSON-ish error", `{"error":"dial amqp://u:S3cr3t@broker.internal:5672: refused"}`, []string{"S3cr3t"}, []string{"broker.internal:5672", "refused"}},
 }
 
@@ -78,7 +88,7 @@ func TestScrubCredentials(t *testing.T) {
 func TestScrubLeavesInnocentTextAlone(t *testing.T) {
 	for _, in := range []string{
 		"", "OK", "mongodb: last success 3s ago", "dial tcp 10.0.0.1:5672: connect: refused",
-		"https://api.example.com/v1/status", "amqp://broker.internal:5672", "contact ops@example.com", "12:30 started",
+		"https://api.example.com/v1/status", "https://a.example.com/x http://b.example.com/y", "amqp://broker.internal:5672", "a=b&c=d", "2026-10-05T10:00:00Z ok", "contact ops@example.com", "12:30 started",
 	} {
 		if got := ScrubCredentials(in); got != in {
 			t.Errorf("changed %q -> %q", in, got)
@@ -129,7 +139,7 @@ func TestHandlersScrubEveryBody(t *testing.T) {
 					t.Errorf("%s body leaks %q:\n%s", scope, frag, body)
 				}
 			}
-			if scope != "startup" && !strings.Contains(body, "broker.internal:5672") {
+			if scope != "startup" && !strings.Contains(body, "amqp://<redacted>") {
 				t.Errorf("%s body lost the host:\n%s", scope, body)
 			}
 			if scope == "ready" && !strings.Contains(body, "<redacted>") {
@@ -228,5 +238,25 @@ func TestRenderScrubsNote(t *testing.T) {
 	b := r.render(Snapshot{Note: "see amqp://u:S3cr3t@h.internal"})
 	if strings.Contains(b.Note, "S3cr3t") || !strings.Contains(b.Note, "h.internal") {
 		t.Fatalf("note: %q", b.Note)
+	}
+}
+
+// TestScrubKeepsAHostOnlyWhenUnambiguous pins exact outputs: the host survives
+// in the one unambiguous shape and nowhere else.
+func TestScrubKeepsAHostOnlyWhenUnambiguous(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{"unambiguous", "dial amqp://u:S3cr3t@broker.internal:5672/vh failed", "dial amqp://<redacted>@broker.internal:5672/vh failed"},
+		{"two schemes, one @", "amqp://a:S3cr3t@h1.internal http://h2.internal/x", "amqp://<redacted>"},
+		{"email beside the URI", "amqp://a:S3cr3t@h1.internal ops@example.com", "amqp://<redacted>"},
+		{"scheme-less two @", "root:p@ss@db.internal:1 tail", "<redacted>"},
+		{"scheme-less misplaced quote", `a root:p"ss@db.internal tail`, "a <redacted>"},
+		{"scheme-less quoted value", `err="root:S3cr3t@db.internal"`, `err="<redacted>@db.internal"`},
+		{"param runs to the end", "x?password=a&b\"c'd e=f", "x?password=<redacted>"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ScrubCredentials(tc.in); got != tc.want {
+				t.Errorf("%q -> %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }
